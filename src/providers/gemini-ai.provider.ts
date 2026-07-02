@@ -1,4 +1,5 @@
-import { GoogleGenAI, Type, Schema } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
+import type { Schema } from '@google/genai'; // Importação exclusiva de tipo exigida pelo verbatimModuleSyntax
 import type { IAiProvider, IDanfeExtractResult } from './ai.provider.js';
 
 export class GeminiAiProvider implements IAiProvider {
