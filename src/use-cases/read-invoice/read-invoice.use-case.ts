@@ -7,6 +7,10 @@ export class ReadInvoiceUseCase {
 
   async execute(filePath: string): Promise<string> {
     console.log(`[UseCase] Starting invoice read process for path: ${filePath}`);
+
+    if (!filePath || filePath.trim() === '') {
+    throw new Error("File path is required");
+  }
     
     const rawData = await this.storageProvider.readFile(filePath);
     
