@@ -4,11 +4,11 @@ An enterprise-grade **DANFE** (Documento Auxiliar da Nota Fiscal Eletrônica) in
 
 ## 🎯 Project Purpose
 
-Processing Brazilian fiscal documents (DANFEs/NF-es) is notoriously complex due to strict SEFAZ standards, multi-layered tax structures (ICMS, IPI, PIS, COFINS), and diverse layout formats. This system orchestrates an automated pipeline that:
-1. Ingests local fiscal documents (PDFs, Images, or text representations).
-2. Leverages specialized AI Providers (Gemini/OpenAI) to intelligently extract structured fiscal entities (e.g., 44-digit Access Keys, Issuer CNPJ, Line Items, and Tax Breakdown).
+Processing Brazilian fiscal documents (DANFEs/NF-es) is notoriously complex due to strict SEFAZ standards, multi-layered tax structures, and diverse layout formats. This system orchestrates an automated pipeline that:
+1. Ingests local fiscal documents text representations.
+2. Leverages specialized AI Providers (Google Gemini) to intelligently extract structured fiscal entities (e.g., 44-digit Access Keys, Issuer CNPJ, Line Items, and Tax Breakdown) using strict JSON schemas.
 3. Enforces Brazilian fiscal validation rules at the core domain layer.
-4. Normalizes and persists data into downstream repositories, eliminating manual typing errors for local businesses.
+4. Prepares the normalized data to seamlessly increment inventory stock and map local suppliers.
 
 ---
 
@@ -18,19 +18,19 @@ The codebase strictly follows **Clean Architecture** and **SOLID** paradigms to 
 
 ### Directory Structure & Responsibilities
 
-* **`src/entities/`**: Core Business Domain. Contains pure fiscal domain constraints (e.g., `Danfe`, `ProductItem`, `Issuer`). This layer enforces that an Access Key must be exactly 44 digits and that CNPJs must match national formatting algorithms, completely independent of databases or APIs.
-* **`src/use-cases/`**: Application Logic / Flow Marshals. Orchestrates processing flows, such as `ProcessDanfeUseCase`, managing the sequence from file reading to AI extraction, domain validation, and repository storage.
+* **`src/entities/`**: Core Business Domain. Contains pure fiscal domain constraints.
+* **`src/use-cases/`**: Application Logic / Flow Marshals. Orchestrates processing flows, such as `ReadInvoiceUseCase`, managing the sequence from file reading to AI extraction.
 * **`src/providers/`**: External Integration Bridges. Houses abstract contracts and concrete implementations for third-party tools. This isolates file storage (`IStorageProvider`) and LLM processing engines (`IAiProvider`), allowing seamless swaps between AI models.
-* **`src/repositories/`**: Database Gateways. Handles data access layer operations (CRUD). Abstracts the database technology (PostgreSQL, MongoDB, Prisma, etc.), isolating the core from SQL or NoSQL specific details.
-* **`src/controllers/`**: HTTP Request Reception. Acts as the interface gatekeeper. Captures file uploads from multi-part API routes, delegates payloads to Use Cases, and formats fiscal responses back to the client.
+* **`src/repositories/`**: Database Gateways. Handles data access layer operations (CRUD) to manage stock and products.
 
 ---
 
-## ⚡ Core Technical Principles
+## 🧪 Automated Testing Suite
 
-* **Single-Threaded Event Loop & Non-Blocking I/O**: Engineered to absorb high-volume invoice batches during peak accounting periods (e.g., end-of-month closings) without freezing the main application process.
-* **Dependency Injection (DI)**: Components connect strictly via interfaces. You can swap a local file system provider for a cloud storage provider (like AWS S3) without changing a single line of fiscal business logic.
-* **Cost-Efficient Resource Allocation**: Shunts processing queues away from expensive application servers onto background workers and optimized database pools, maximizing hardware ROI on cloud infrastructure.
+The application relies heavily on **Automated Unit Testing** to guarantee that core business logic, validation guards, and data pipelines remain flawless before any deployment.
+
+* **Framework**: Built on top of **Vitest**, a next-generation, ultra-fast TypeScript testing engine.
+* **Isolation Paradigms**: The testing pipeline adheres to strict SOLID principles by utilizing **Mocks/Stubs** (`MockStorageProvider` and `MockAiProvider`). This isolates the core application under test (SUT) from actual infrastructure liabilities like local hard drive I/O or paid third-party AI network requests.
 
 ---
 
