@@ -1,22 +1,25 @@
-import { type IStorageProvider } from '../../providers/storage.provider.js';
+import type { IStorageProvider } from '../../providers/storage.provider.js';
+import type { IAiProvider, IDanfeExtractResult } from '../../providers/ai.provider.js';
 
 export class ReadInvoiceUseCase {
-  // Aqui aplicamos a Inversão de Dependência:
-  // O caso de uso exige QUALQUER provedor de storage, desde que siga o contrato.
-  constructor(private storageProvider: IStorageProvider) {}
+  constructor(
+    private storageProvider: IStorageProvider,
+    private aiProvider: IAiProvider // 1. Injetamos a nova tomada da IA aqui
+  ) {}
 
-  async execute(filePath: string): Promise<string> {
-    console.log(`[UseCase] Starting invoice read process for path: ${filePath}`);
-
+  // 2. Agora o método não devolve mais uma string pura, devolve o DANFE estruturado!
+  async execute(filePath: string): Promise<IDanfeExtractResult> {
     if (!filePath || filePath.trim() === '') {
-    throw new Error("File path is required");
-  }
+      throw new Error("File path is required");
+    }
+
+    // Passo 1: Busca o texto bruto do arquivo usando o Storage
+    const rawText = await this.storageProvider.readFile(filePath);
     
-    const rawData = await this.storageProvider.readFile(filePath);
+    // Passo 2: Passa o texto bruto para a inteligência artificial processar
+    const danfeData = await this.aiProvider.extractDanfeData(rawText);
     
-    // No futuro, o próximo passo da IA vai entrar bem aqui!
-    // rawData -> passar para o AIProvider
-    
-    return rawData;
+    // Passo 3: Retorna os dados prontos para o estoque
+    return danfeData;
   }
 }
