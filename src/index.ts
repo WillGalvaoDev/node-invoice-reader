@@ -1,5 +1,6 @@
-import { DiskStorageProvider } from './providers/implementations/disk-storage.provider.js'; // ou o nome exato do seu provider de disco
+import { DiskStorageProvider } from './providers/implementations/disk-storage.provider.js';
 import { GeminiAiProvider } from './providers/gemini-ai.provider.js';
+import { InMemoryProductRepository } from './repositories/in-memory-product.repository.js'; // Importe aqui
 import { ReadInvoiceUseCase } from './use-cases/read-invoice/read-invoice.use-case.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,9 +15,11 @@ async function bootstrap() {
     // 1. Instanciamos os adaptadores reais de Infraestrutura
     const storageProvider = new DiskStorageProvider();
     const aiProvider = new GeminiAiProvider();
+    const productRepository = new InMemoryProductRepository(); // Instancie aqui
 
-    // 2. Injetamos os provedores no Caso de Uso da Aplicação
-    const readInvoiceUseCase = new ReadInvoiceUseCase(storageProvider, aiProvider);
+    // 2. Injetamos os três provedores no Caso de Uso da Aplicação
+    const readInvoiceUseCase = new ReadInvoiceUseCase(storageProvider, aiProvider, productRepository);
+
 
     // 3. Definimos o caminho do arquivo de teste (vamos criar este arquivo no próximo passo)
     const sampleFilePath = path.resolve(__dirname, '../nota.txt');
