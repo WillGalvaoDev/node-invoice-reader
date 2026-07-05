@@ -1,6 +1,7 @@
+import '../prisma.config.js';
 import { DiskStorageProvider } from './providers/implementations/disk-storage.provider.js';
 import { GeminiAiProvider } from './providers/gemini-ai.provider.js';
-import { InMemoryProductRepository } from './repositories/in-memory-product.repository.js'; // Importe aqui
+import { PrismaProductRepository } from './repositories/prisma-product.repository.js';
 import { ReadInvoiceUseCase } from './use-cases/read-invoice/read-invoice.use-case.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,7 @@ async function bootstrap() {
     // 1. Instanciamos os adaptadores reais de Infraestrutura
     const storageProvider = new DiskStorageProvider();
     const aiProvider = new GeminiAiProvider();
-    const productRepository = new InMemoryProductRepository(); // Instancie aqui
+    const productRepository = new PrismaProductRepository();
 
     // 2. Injetamos os três provedores no Caso de Uso da Aplicação
     const readInvoiceUseCase = new ReadInvoiceUseCase(storageProvider, aiProvider, productRepository);
