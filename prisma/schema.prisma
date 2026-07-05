@@ -1,0 +1,20 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Product {
+  id              String   @id @default(uuid())
+  code            String
+  description     String
+  quantity        Float    
+  unitMeasurement String
+  unitPrice       Float
+  totalPrice      Float
+  createdAt       DateTime @default(now())
+
+  @@map("products")
+}
