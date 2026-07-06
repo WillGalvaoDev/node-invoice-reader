@@ -6,6 +6,7 @@ export interface IProduct {
   unitMeasurement: string;
   unitPrice: number;
   totalPrice: number;
+  userId?: string | null | undefined;
   createdAt?: Date;
 }
 

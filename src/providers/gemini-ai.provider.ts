@@ -1,17 +1,35 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import type { Schema } from '@google/genai'; // Importação exclusiva de tipo exigida pelo verbatimModuleSyntax
+import type { Schema } from '@google/genai';
 import type { IAiProvider, IDanfeExtractResult } from './ai.provider.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export class GeminiAiProvider implements IAiProvider {
   private ai: GoogleGenAI;
 
   constructor() {
-    // O SDK busca automaticamente a variável de ambiente process.env.GEMINI_API_KEY
     this.ai = new GoogleGenAI({});
   }
 
-  async extractDanfeData(rawText: string): Promise<IDanfeExtractResult> {
-    // Definimos o esquema rígido que o Gemini DEVE seguir na resposta
+  // Função auxiliar para converter o arquivo local no formato que o SDK do Gemini exige
+  private fileToGenerativePart(filePath: string) {
+    const ext = path.extname(filePath).toLowerCase();
+    
+    // Mapeia os Mime Types aceitos
+    let mimeType = 'text/plain';
+    if (ext === '.png') mimeType = 'image/png';
+    if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+    if (ext === '.pdf') mimeType = 'application/pdf';
+
+    return {
+      inlineData: {
+        data: Buffer.from(fs.readFileSync(filePath)).toString("base64"),
+        mimeType
+      },
+    };
+  }
+
+  async extractDanfeData(filePath: string): Promise<IDanfeExtractResult> {
     const responseSchema: Schema = {
       type: Type.OBJECT,
       properties: {
@@ -48,38 +66,26 @@ export class GeminiAiProvider implements IAiProvider {
       required: ['accessKey', 'invoiceNumber', 'series', 'issuedAt', 'totalValue', 'supplier', 'products']
     };
 
-    const prompt = `
-      Você é um especialista em documentos fiscais brasileiros. 
-      Analise o texto extraído de um DANFE (Nota Fiscal Eletrônica) fornecido abaixo e extraia as informações estruturadas necessárias para alimentar um sistema de controle de estoque.
-      
-      Texto bruto do DANFE:
-      ---
-      ${rawText}
-      ---
-    `;
+    const basePrompt = `Você é um especialista em documentos fiscais brasileiros.
+Análise o arquivo de DANFE (Nota Fiscal Eletrônica) fornecido em anexo e extraia as informações estruturadas necessárias para alimentar um sistema de controle de estoque.`;
 
-    // Chamamos o modelo flash, que é ultra veloz e gratuito no AI Studio
+    // Prepara o arquivo (carrega o binário em base64 com o mimeType correto)
+    const filePart = this.fileToGenerativePart(filePath);
+
+    // Passamos tanto o texto do prompt quanto o objeto de mídia dentro da array de contents
     const response = await this.ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: [basePrompt, filePart], 
       config: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
-        temperature: 0.1 // Temperatura baixa para evitar alucinações e manter o modelo factual
-      }
+      },
     });
 
     if (!response.text) {
-      throw new Error('Gemini falhou em retornar uma resposta.');
+      throw new Error("O Gemini retornou uma resposta vazia.");
     }
 
-    // Como o Gemini garante o esquema, podemos dar o parse e o cast com segurança
-    const data = JSON.parse(response.text);
-    
-    // Tratamos a conversão da string de data para um objeto Date real do JS
-    return {
-      ...data,
-      issuedAt: new Date(data.issuedAt)
-    };
+    return JSON.parse(response.text) as IDanfeExtractResult;
   }
 }

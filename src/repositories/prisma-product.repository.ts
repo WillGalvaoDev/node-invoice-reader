@@ -19,6 +19,7 @@ export class PrismaProductRepository implements IProductRepository {
         unitMeasurement: product.unitMeasurement,
         unitPrice: product.unitPrice,
         totalPrice: product.totalPrice,
+        userId: product.userId ?? null,
       },
     });
 

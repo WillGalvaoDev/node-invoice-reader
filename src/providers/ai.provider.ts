@@ -24,5 +24,5 @@ export interface IDanfeExtractResult {
 }
 
 export interface IAiProvider {
-  extractDanfeData(rawText: string): Promise<IDanfeExtractResult>;
+  extractDanfeData(filePath: string): Promise<IDanfeExtractResult>;
 }
