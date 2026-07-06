@@ -14,6 +14,7 @@ model Product {
   unitMeasurement String
   unitPrice       Float
   totalPrice      Float
+  userId          String?  // <-- PREPARADO PARA O AUTH: Identifica o dono do estoque
   createdAt       DateTime @default(now())
 
   @@map("products")
