@@ -1,12 +1,14 @@
 import { PrismaClient } from '@prisma/client';
-import { PrismaLibSql } from '@prisma/adapter-libsql';
 import type { IProductRepository, IProduct } from './product.repository.js';
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
-// Inicialização limpa e global da instância seguindo a sua ideia
-const adapter = new PrismaLibSql({
-  url: process.env["DATABASE_URL"]!,
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
 });
 
+const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 export class PrismaProductRepository implements IProductRepository {
