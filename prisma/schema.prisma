@@ -7,16 +7,30 @@ generator client {
   engineType = "binary"
 }
 
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  name      String
+  password  String
+  createdAt DateTime  @default(now())
+  products  Product[]
+
+  @@map("users")
+}
+
 model Product {
   id              String   @id @default(uuid())
   code            String
   description     String
-  quantity        Float    
+  quantity        Float
   unitMeasurement String
   unitPrice       Float
   totalPrice      Float
-  userId          String?  // <-- PREPARADO PARA O AUTH: Identifica o dono do estoque
   createdAt       DateTime @default(now())
+
+  // Relação direta e limpa com o User
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("products")
 }
