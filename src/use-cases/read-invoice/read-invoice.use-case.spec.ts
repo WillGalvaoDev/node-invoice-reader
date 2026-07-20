@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Mocked } from 'vitest'; // Importamos o tipo utilitário explicitamente
+import type { Mocked } from 'vitest';
 import { ReadInvoiceUseCase } from './read-invoice.use-case.js';
 import type { IStorageProvider } from '../../providers/storage.provider.js';
 import type { IAiProvider, IDanfeExtractResult } from '../../providers/ai.provider.js';
@@ -43,37 +43,43 @@ describe('ReadInvoiceUseCase', () => {
   };
 
   beforeEach(() => {
+    // Mantemos o mock instanciado vazio para não quebrar o construtor do Use Case
     storageProviderMock = {
-      readFile: vi.fn().mockResolvedValue('texto bruto da nota fiscal') // Alterado de readTextFile para readFile
-    };
+      readFile: vi.fn()
+    } as unknown as Mocked<IStorageProvider>;
 
     aiProviderMock = {
       extractDanfeData: vi.fn().mockResolvedValue(mockAiResult)
-    };
+    } as unknown as Mocked<IAiProvider>;
 
-    // Criamos o mock do nosso novo repositório de produtos
     productRepositoryMock = {
       save: vi.fn().mockImplementation((product: IProduct) => Promise.resolve({ id: 'any-id', ...product })),
       findByCode: vi.fn().mockResolvedValue(null)
-    };
+    } as unknown as Mocked<IProductRepository>;
 
-    // Injetamos o terceiro elemento no construtor (o TS vai chiar aqui até ajustarmos o use case)
     sut = new ReadInvoiceUseCase(storageProviderMock, aiProviderMock, productRepositoryMock);
   });
 
-  it('should read the invoice file, extract data via AI, and save all products to the repository', async () => {
-    const filePath = '/path/to/any/nota.txt';
+  it('should extract data via AI using the file path and save all products to the repository', async () => {
+    const filePath = '/path/to/any/nota.png';
+    const userId = 'user-any-id';
     
-    const result = await sut.execute(filePath);
+    // Passamos o DTO correto com o filePath e o userId
+    const result = await sut.execute({ filePath, userId });
 
-    // 1. Garante que leu o arquivo e acionou a IA corretamente
-    expect(storageProviderMock.readFile).toHaveBeenCalledWith(filePath); // Alterado aqui também
-    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith('texto bruto da nota fiscal');
+    // 1. Garante que acionou a IA passando o caminho do arquivo direto
+    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(filePath);
     
-    // 2. Garante que o método save do repositório foi chamado para CADA produto da nota
+    // 2. Garante que o método save do repositório foi chamado com as propriedades do produto e o userId atrelado
     expect(productRepositoryMock.save).toHaveBeenCalledTimes(2);
-    expect(productRepositoryMock.save).toHaveBeenNthCalledWith(1, mockAiResult.products[0]);
-    expect(productRepositoryMock.save).toHaveBeenNthCalledWith(2, mockAiResult.products[1]);
+    expect(productRepositoryMock.save).toHaveBeenNthCalledWith(1, {
+      ...mockAiResult.products[0],
+      userId
+    });
+    expect(productRepositoryMock.save).toHaveBeenNthCalledWith(2, {
+      ...mockAiResult.products[1],
+      userId
+    });
 
     // 3. Retorno final do use case continua íntegro
     expect(result.invoiceNumber).toBe('000542');
