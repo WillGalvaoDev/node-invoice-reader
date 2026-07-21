@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { JoseTokenProvider } from '../providers/implementations/jose-token.provider.js';
+import { AppError } from '../errors/app-error.js';
 
 export async function ensureAuthenticated(
   req: Request,
@@ -10,7 +11,7 @@ export async function ensureAuthenticated(
 
   // 1. Verifica se o header Authorization foi enviado
   if (!authHeader) {
-    return res.status(401).json({ error: 'Token is missing.' });
+    throw new AppError('JWT token não informado.', 401);
   }
 
   // 2. O formato esperado é "Bearer <token>", então dividimos a string

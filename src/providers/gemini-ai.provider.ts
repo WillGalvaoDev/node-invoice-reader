@@ -3,6 +3,7 @@ import type { Schema } from '@google/genai';
 import type { IAiProvider, IDanfeExtractResult } from './ai.provider.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { AppError } from '../errors/app-error.js';
 
 export class GeminiAiProvider implements IAiProvider {
   private ai: GoogleGenAI;
@@ -89,7 +90,7 @@ Estruture o JSON final seguindo rigorosamente o esquema.`;
     });
 
     if (!response.text) {
-      throw new Error("O Gemini retornou uma resposta vazia.");
+      throw new AppError('Não foi possível extrair dados da nota fiscal fornecida.', 422);
     }
 
     return JSON.parse(response.text) as IDanfeExtractResult;
