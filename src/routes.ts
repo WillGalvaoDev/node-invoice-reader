@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { ensureAuthenticated } from './middlewares/ensure-authenticated.js';
 import multer from 'multer';
 import { RegisterUserController } from './controllers/register-user.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
@@ -42,9 +43,14 @@ const loginController = new LoginController(loginUseCase);
 
 
 // ROTAS
-routes.post('/invoices/upload', upload.single('file'), (req, res) => {
-  uploadInvoiceController.handle(req, res);
-});
+routes.post(
+  '/invoices/upload', 
+  upload.single('file'), 
+  ensureAuthenticated, 
+  (req, res) => {
+    uploadInvoiceController.handle(req, res);
+  }
+);
 
 routes.post('/users', (req, res) => {
   registerUserController.handle(req, res);

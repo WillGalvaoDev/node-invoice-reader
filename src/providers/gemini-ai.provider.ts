@@ -11,15 +11,15 @@ export class GeminiAiProvider implements IAiProvider {
     this.ai = new GoogleGenAI({});
   }
 
-  // Função auxiliar para converter o arquivo local no formato que o SDK do Gemini exige
   private fileToGenerativePart(filePath: string) {
     const ext = path.extname(filePath).toLowerCase();
     
-    // Mapeia os Mime Types aceitos
-    let mimeType = 'text/plain';
+    let mimeType = 'image/jpeg'; // Fallback seguro para imagens
     if (ext === '.png') mimeType = 'image/png';
     if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
     if (ext === '.pdf') mimeType = 'application/pdf';
+
+    console.log(`[GeminiAI] Processando arquivo: ${filePath} com MimeType: ${mimeType}`);
 
     return {
       inlineData: {
@@ -66,13 +66,19 @@ export class GeminiAiProvider implements IAiProvider {
       required: ['accessKey', 'invoiceNumber', 'series', 'issuedAt', 'totalValue', 'supplier', 'products']
     };
 
-    const basePrompt = `Você é um especialista em documentos fiscais brasileiros.
-Análise o arquivo de DANFE (Nota Fiscal Eletrônica) fornecido em anexo e extraia as informações estruturadas necessárias para alimentar um sistema de controle de estoque.`;
+    const basePrompt = `Você é um leitor óptico (OCR) de notas fiscais severo e exato.
+Analise a imagem anexada e extraia EXATAMENTE os caracteres de texto que estão visíveis.
 
-    // Prepara o arquivo (carrega o binário em base64 com o mimeType correto)
+DIRETRIZES OBRIGATÓRIAS:
+1. O EMITENTE/FORNECEDOR está no topo. Transcreva a Razão Social/Nome e o CNPJ exatamente como impressos. Não invente codinomes como "Serrana" ou "Empresa Modelo".
+2. Olhe a tabela "DADOS DOS PRODUTOS / SERVIÇOS". Conte quantas linhas ela possui e transcreva UMA POR UMA. Se houver 8 itens, o seu array "products" DEVE conter exatamente 8 objetos.
+3. Transcreva a descrição exata (ex: "BARRA CHATA 1\" TRABALHADA").
+4. Converta valores usando ponto para decimais (ex: 4059.20).
+
+Estruture o JSON final seguindo rigorosamente o esquema.`;
+
     const filePart = this.fileToGenerativePart(filePath);
 
-    // Passamos tanto o texto do prompt quanto o objeto de mídia dentro da array de contents
     const response = await this.ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [basePrompt, filePart], 

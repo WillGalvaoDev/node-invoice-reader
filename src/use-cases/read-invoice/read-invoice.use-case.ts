@@ -15,28 +15,39 @@ export class ReadInvoiceUseCase {
   ) {}
 
   async execute({ filePath, userId }: IReadInvoiceRequest): Promise<IDanfeExtractResult> {
-    // 1. Passa o caminho do arquivo direto para o Gemini AI Provider extrair os dados da imagem
-    const extractedData = await this.aiProvider.extractDanfeData(filePath);
+    try {
+      // 1. Passa o caminho do arquivo direto para o Gemini AI Provider extrair os dados da imagem
+      const extractedData = await this.aiProvider.extractDanfeData(filePath);
 
-    // 2. Valida se existem produtos antes de rodar o loop (evita quebrar se a IA falhar na listagem)
-    if (extractedData.products && extractedData.products.length > 0) {
-      // Usamos Promise.all para salvar todos em paralelo, deixando a execução muito mais rápida
-      const savePromises = extractedData.products.map(product =>
-        this.productRepository.save({
-          code: product.code,
-          description: product.description,
-          quantity: product.quantity,
-          unitMeasurement: product.unitMeasurement,
-          unitPrice: product.unitPrice,
-          totalPrice: product.totalPrice,
-          userId, // Armazena o ID do usuário (ou null caso não venha no request)
-        })
-      );
+      // 2. Valida se existem produtos antes de rodar o loop (evita quebrar se a IA falhar na listagem)
+      if (extractedData.products && extractedData.products.length > 0) {
+        // Usamos Promise.all para salvar todos em paralelo, deixando a execução muito mais rápida
+        const savePromises = extractedData.products.map(product =>
+          this.productRepository.save({
+            code: product.code,
+            description: product.description,
+            quantity: product.quantity,
+            unitMeasurement: product.unitMeasurement,
+            unitPrice: product.unitPrice,
+            totalPrice: product.totalPrice,
+            userId, // Armazena o ID do usuário (ou null caso não venha no request)
+          })
+        );
 
-      await Promise.all(savePromises);
+        await Promise.all(savePromises);
+      }
+
+      // 3. Retorna o resultado consolidado da nota para o controller
+      return extractedData;
+    } finally {
+      // 4. O 'finally' SEMPRE executa, tanto em sucesso quanto em falha
+      console.log(`[Use Case] Tentando deletar arquivo em: ${filePath}`);
+      try {
+        await this.storageProvider.deleteFile(filePath);
+        console.log(`[Storage] Arquivo temporário removido: ${filePath}`);
+      } catch (error) {
+        console.error(`[Storage] Erro ao deletar arquivo temporário: ${filePath}`, error);
+      }
     }
-
-    // 3. Retorna o resultado consolidado da nota para o controller
-    return extractedData;
   }
 }
