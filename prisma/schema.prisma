@@ -3,19 +3,87 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
   engineType = "binary"
 }
 
 model User {
-  id        String    @id @default(uuid())
-  email     String    @unique
+  id        String   @id @default(uuid())
+  email     String   @unique
   name      String
   password  String
-  createdAt DateTime  @default(now())
-  products  Product[]
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  ownedCompanies  Company[]             @relation("CompanyOwner")
+  collaborations CompanyCollaborator[]
+  auditLogs      AuditLog[]
+  createdProducts Product[]             @relation("CreatedBy")
 
   @@map("users")
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  cnpj      String?
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  owner         User                  @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  stocks        Stock[]
+  collaborators CompanyCollaborator[]
+  auditLogs     AuditLog[]
+
+  @@map("companies")
+}
+
+model CompanyCollaborator {
+  id        String   @id @default(uuid())
+  companyId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissions StockPermission[]
+
+  @@unique([companyId, userId]) // Um usuário só pode ser adicionado uma vez por empresa
+  @@map("company_collaborators")
+}
+
+model Stock {
+  id        String   @id @default(uuid())
+  name      String
+  companyId String
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products    Product[]
+  permissions StockPermission[]
+  auditLogs   AuditLog[]
+
+  @@map("stocks")
+}
+
+model StockPermission {
+  id             String  @id @default(uuid())
+  collaboratorId String
+  stockId        String
+  canView        Boolean @default(false)
+  canCreate      Boolean @default(false)
+  canEdit        Boolean @default(false)
+  canDelete      Boolean @default(false)
+
+  // Relacionamentos
+  collaborator CompanyCollaborator @relation(fields: [collaboratorId], references: [id], onDelete: Cascade)
+  stock        Stock               @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([collaboratorId, stockId]) // O colaborador só tem um registro de permissão por estoque
+  @@map("stock_permissions")
 }
 
 model Product {
@@ -28,9 +96,41 @@ model Product {
   totalPrice      Float
   createdAt       DateTime @default(now())
 
-  // Relação direta e limpa com o User
-  userId          String?
-  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // O produto agora pertence a um Estoque específico
+  stockId String
+  stock   Stock  @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  // Rastreabilidade opcional de quem cadastrou o produto
+  userId String?
+  user   User?   @relation("CreatedBy", fields: [userId], references: [id], onDelete: SetNull)
 
   @@map("products")
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  READ_INVOICE
+}
+
+model AuditLog {
+  id          String      @id @default(uuid())
+  companyId   String
+  stockId     String?
+  userId      String
+  action      AuditAction
+  entity      String      // Ex: "Product", "Stock", "Company"
+  entityId    String?
+  description String?     // Ex: "Produto PARAFUSO atualizado"
+  previousState Json?     // Snapshot de como era antes da alteração
+  newState      Json?     // Snapshot de como ficou depois
+  createdAt   DateTime    @default(now())
+
+  // Relacionamentos
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  stock   Stock?  @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
 }

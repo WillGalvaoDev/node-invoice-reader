@@ -20,6 +20,7 @@ describe('ListProductsUseCase', () => {
       unitMeasurement: 'KG',
       unitPrice: 15.0,
       totalPrice: 150.0,
+      stockId: 'stock-1',
       userId: 'user-1',
     });
 
@@ -30,6 +31,7 @@ describe('ListProductsUseCase', () => {
       unitMeasurement: 'METRO',
       unitPrice: 20.0,
       totalPrice: 100.0,
+      stockId: 'stock-1',
       userId: 'user-1',
     });
 
@@ -40,6 +42,7 @@ describe('ListProductsUseCase', () => {
       unitMeasurement: 'UN',
       unitPrice: 50.0,
       totalPrice: 50.0,
+      stockId: 'stock-1',
       userId: 'user-2',
     });
 
@@ -49,8 +52,8 @@ describe('ListProductsUseCase', () => {
     // 3. Asserções
     expect(products).toHaveLength(2);
     expect(products).toEqual([
-      expect.objectContaining({ code: '001', userId: 'user-1' }),
-      expect.objectContaining({ code: '002', userId: 'user-1' }),
+      expect.objectContaining({ code: '001', userId: 'user-1', stockId: 'stock-1' }),
+      expect.objectContaining({ code: '002', userId: 'user-1', stockId: 'stock-1' }),
     ]);
   });
 
