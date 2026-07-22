@@ -43,9 +43,10 @@ describe('ReadInvoiceUseCase', () => {
   };
 
   beforeEach(() => {
-    // Mantemos o mock instanciado vazio para não quebrar o construtor do Use Case
+    // Adicionamos o deleteFile para suprir a limpeza de arquivo temporário no Use Case
     storageProviderMock = {
-      readFile: vi.fn()
+      readFile: vi.fn(),
+      deleteFile: vi.fn().mockResolvedValue(undefined)
     } as unknown as Mocked<IStorageProvider>;
 
     aiProviderMock = {
@@ -54,7 +55,8 @@ describe('ReadInvoiceUseCase', () => {
 
     productRepositoryMock = {
       save: vi.fn().mockImplementation((product: IProduct) => Promise.resolve({ id: 'any-id', ...product })),
-      findByCode: vi.fn().mockResolvedValue(null)
+      findByCode: vi.fn().mockResolvedValue(null),
+      findByUserId: vi.fn().mockResolvedValue([])
     } as unknown as Mocked<IProductRepository>;
 
     sut = new ReadInvoiceUseCase(storageProviderMock, aiProviderMock, productRepositoryMock);
