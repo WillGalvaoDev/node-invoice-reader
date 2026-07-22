@@ -17,6 +17,9 @@ import { LoginUseCase } from './use-cases/login/login.use-case.js';
 import { LoginController } from './controllers/login.controller.js';
 import { JoseTokenProvider } from './providers/implementations/jose-token.provider.js';
 
+import { ListProductsUseCase } from './use-cases/list-products/list-products.use-case.js';
+import { ListProductsController } from './controllers/list-products.controller.js';
+
 export const routes = Router();
 
 const upload = multer({ dest: 'tmp/' });
@@ -27,6 +30,8 @@ const aiProvider = new GeminiAiProvider();
 const productRepository = new PrismaProductRepository();
 const readInvoiceUseCase = new ReadInvoiceUseCase(storageProvider, aiProvider, productRepository);
 const uploadInvoiceController = new UploadInvoiceController(readInvoiceUseCase);
+const listProductsUseCase = new ListProductsUseCase(productRepository);
+const listProductsController = new ListProductsController(listProductsUseCase);
 
 // Compartilhado - Usuários (Instanciados uma vez para ambos os casos de uso)
 const userRepository = new PrismaUserRepository();
@@ -59,4 +64,8 @@ routes.post('/users', (req, res) => {
 // NOVA ROTA DE LOGIN
 routes.post('/login', (req, res) => {
   loginController.handle(req, res);
+});
+
+routes.get('/products', ensureAuthenticated, (req, res) => {
+  listProductsController.handle(req, res);
 });

@@ -14,30 +14,30 @@ export async function ensureAuthenticated(
     throw new AppError('JWT token não informado.', 401);
   }
 
-  // 2. O formato esperado é "Bearer <token>", então dividimos a string
+  // 2. Separa o "Bearer <token>"
   const [, token] = authHeader.split(' ');
 
   if (!token) {
-    return res.status(401).json({ error: 'Token is missing.' });
+    throw new AppError('JWT token não informado.', 401);
   }
 
   try {
-    // 3. Instancia o provider do jose para validar o token e extrair o payload
+    // 3. Valida o token
     const tokenProvider = new JoseTokenProvider();
     const decoded = await tokenProvider.verifyToken(token);
 
-    if (!decoded) {
-      return res.status(401).json({ error: 'Invalid token.' });
+    if (!decoded || !decoded.sub) {
+      throw new AppError('JWT token inválido.', 401);
     }
 
-    // 4. Injeta o ID do usuário dentro do objeto 'req' para os próximos passos usarem
+    // 4. Injeta o ID do usuário na requisição
     req.user = {
       id: decoded.sub,
     };
 
-    // 5. Autoriza a requisição a prosseguir para o Controller
     return next();
   } catch {
-    return res.status(401).json({ error: 'Invalid token.' });
+    // Se o tokenProvider falhar ou expirar, cai aqui e padroniza a resposta
+    throw new AppError('JWT token inválido ou expirado.', 401);
   }
 }

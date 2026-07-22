@@ -13,4 +13,5 @@ export interface IProduct {
 export interface IProductRepository {
   save(product: IProduct): Promise<IProduct>;
   findByCode(code: string): Promise<IProduct | null>;
+  findByUserId(userId: string): Promise<IProduct[]>;
 }

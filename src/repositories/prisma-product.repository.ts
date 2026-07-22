@@ -34,6 +34,19 @@ export class PrismaProductRepository implements IProductRepository {
       where: { code },
     });
 
-    return product;
+    return product as IProduct | null;
+  }
+
+  async findByUserId(userId: string): Promise<IProduct[]> {
+    const products = await prisma.product.findMany({
+      where: {
+        userId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return products as IProduct[];
   }
 }
