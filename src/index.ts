@@ -1,9 +1,12 @@
 import '../prisma.config.js'; // Garante o registro do prisma antes de tudo
 import express from 'express';
+import cors from 'cors';
 import { routes } from './routes.js';
 import { errorHandler } from './middlewares/error-handler.js';
 
 const app = express();
+
+app.use(cors());
 
 // Middleware para decodificar JSON no corpo das requisições
 app.use(express.json());
