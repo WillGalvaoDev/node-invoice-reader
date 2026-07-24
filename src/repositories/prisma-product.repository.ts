@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import type { IProductRepository, IProduct } from './product.repository.js';
+import { ProductMapper } from '../mappers/product.mapper.js';
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
@@ -17,54 +18,71 @@ export class PrismaProductRepository implements IProductRepository {
       data: {
         code: product.code,
         description: product.description,
-        quantity: product.quantity,
+        quantity: Number(product.quantity),
         unitMeasurement: product.unitMeasurement,
-        unitPrice: product.unitPrice,
-        totalPrice: product.totalPrice,
-        stockId: product.stockId, // 👈 Mapeado para o novo campo no Postgres
+        unitPrice: Number(product.unitPrice),
+        totalPrice: Number(product.totalPrice),
+        stockId: product.stockId,
         userId: product.userId ?? null,
       },
     });
 
     console.log(`💾 [Prisma Banco Real] Produto persistido com sucesso: ${createdProduct.description}`);
-    return createdProduct as IProduct;
+    return ProductMapper.toDomain(createdProduct);
   }
 
   async findByCode(code: string, stockId: string): Promise<IProduct | null> {
     const product = await prisma.product.findFirst({
-      where: { 
-        code,
-        stockId,
-      },
+      where: { code, stockId },
     });
 
-    return product as IProduct | null;
+    if (!product) return null;
+
+    return ProductMapper.toDomain(product);
   }
 
   async findByUserId(userId: string): Promise<IProduct[]> {
+    console.log(`🛢️ [Prisma] Buscando produtos onde userId === "${userId}"`);
+    
     const products = await prisma.product.findMany({
-      where: {
-        userId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
     });
 
-    return products as IProduct[];
+    console.log(`🛢️ [Prisma] Produtos encontrados no banco: ${products.length}`);
+    return products.map(ProductMapper.toDomain);
   }
 
-  async findByStockId(stockId: string): Promise<IProduct[]> {
+  async findByStockId(stockId: string, userId?: string): Promise<IProduct[]> {
+    console.log(`🛢️ [Prisma] Buscando produtos com stockId = "${stockId}" e userId = "${userId}"`);
+    
     const products = await prisma.product.findMany({
       where: {
         stockId,
+        ...(userId && { userId }),
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: { createdAt: 'desc' },
     });
 
-    return products as IProduct[];
+    console.log(`🛢️ [Prisma] Produtos encontrados por estoque: ${products.length}`);
+    return products.map(ProductMapper.toDomain);
+  }
+
+  async findByCompanyId(companyId: string, userId?: string): Promise<IProduct[]> {
+    console.log(`🛢️ [Prisma] Buscando produtos com companyId = "${companyId}" e userId = "${userId}"`);
+    
+    const products = await prisma.product.findMany({
+      where: {
+        stock: {
+          companyId,
+        },
+        ...(userId && { userId }),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    console.log(`🛢️ [Prisma] Produtos encontrados por empresa: ${products.length}`);
+    return products.map(ProductMapper.toDomain);
   }
 
   async findById(id: string): Promise<IProduct | null> {
@@ -72,7 +90,9 @@ export class PrismaProductRepository implements IProductRepository {
       where: { id },
     });
 
-    return product as IProduct | null;
+    if (!product) return null;
+
+    return ProductMapper.toDomain(product);
   }
 
   async update(id: string, data: Partial<IProduct>): Promise<IProduct> {
@@ -81,16 +101,16 @@ export class PrismaProductRepository implements IProductRepository {
       data: {
         ...(data.code !== undefined && { code: data.code }),
         ...(data.description !== undefined && { description: data.description }),
-        ...(data.quantity !== undefined && { quantity: data.quantity }),
+        ...(data.quantity !== undefined && { quantity: Number(data.quantity) }),
         ...(data.unitMeasurement !== undefined && { unitMeasurement: data.unitMeasurement }),
-        ...(data.unitPrice !== undefined && { unitPrice: data.unitPrice }),
-        ...(data.totalPrice !== undefined && { totalPrice: data.totalPrice }),
+        ...(data.unitPrice !== undefined && { unitPrice: Number(data.unitPrice) }),
+        ...(data.totalPrice !== undefined && { totalPrice: Number(data.totalPrice) }),
         ...(data.stockId !== undefined && { stockId: data.stockId }),
         ...(data.userId !== undefined && { userId: data.userId ?? null }),
       },
     });
 
-    return updatedProduct as IProduct;
+    return ProductMapper.toDomain(updatedProduct);
   }
 
   async delete(id: string): Promise<void> {

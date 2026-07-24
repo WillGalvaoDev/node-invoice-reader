@@ -5,15 +5,17 @@ export class InMemoryProductRepository implements IProductRepository {
 
   async save(product: IProduct): Promise<IProduct> {
     const newProduct: IProduct = {
-      id: product.id ?? 'product-1',
+      id: product.id ?? `product-${this.items.length + 1}`,
       code: product.code,
+      ean: product.ean ?? null,
+      ncm: product.ncm ?? null,
       description: product.description,
       quantity: product.quantity,
       unitMeasurement: product.unitMeasurement,
       unitPrice: product.unitPrice,
       totalPrice: product.totalPrice,
-      stockId: product.stockId, // ✅ Adicionado
-      userId: product.userId,
+      stockId: product.stockId,
+      userId: product.userId ?? null,
       createdAt: product.createdAt ?? new Date(),
     };
 
@@ -32,8 +34,20 @@ export class InMemoryProductRepository implements IProductRepository {
     return this.items.filter((item) => item.userId === userId);
   }
 
-  async findByStockId(stockId: string): Promise<IProduct[]> {
-    return this.items.filter((item) => item.stockId === stockId);
+  async findByStockId(stockId: string, userId?: string): Promise<IProduct[]> {
+    return this.items.filter((item) => {
+      const matchesStock = item.stockId === stockId;
+      const matchesUser = userId ? item.userId === userId : true;
+      return matchesStock && matchesUser;
+    });
+  }
+
+  async findByCompanyId(companyId: string, userId?: string): Promise<IProduct[]> {
+    return this.items.filter((item) => {
+      // Em memória, mantemos a verificação do usuário caso informado
+      const matchesUser = userId ? item.userId === userId : true;
+      return matchesUser;
+    });
   }
 
   async findById(id: string): Promise<IProduct | null> {
