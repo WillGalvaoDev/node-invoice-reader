@@ -11,26 +11,32 @@ export class UploadInvoiceController {
       throw new AppError('Arquivo da nota fiscal é obrigatório.', 400);
     }
 
+    // 2. Valida se o ID do estoque veio no body da requisição
+    const { stockId } = request.body;
+
+    if (!stockId) {
+      throw new AppError('ID do estoque (stockId) é obrigatório.', 400);
+    }
+
     const filePath = request.file.path;
     // Pega o ID do usuário injetado pelo middleware ensureAuthenticated
     const userId = request.user?.id;
 
-    // 2. Executa o Use Case (Gemini + Prisma + Limpeza de arquivo)
-    const result = await this.readInvoiceUseCase.execute({
+    // 3. Executa o Use Case (Gemini OCR + Upsert por código + Sugestão por IA + Limpeza de arquivo)
+    const { extractedData, processedProducts, suggestions } = await this.readInvoiceUseCase.execute({
       filePath,
+      stockId,
       userId,
     });
-
-    // 3. Desestruturamos para separar 'products' dos dados gerais da nota
-    const { products, ...invoice } = result;
 
     // 4. Retorna no padrão limpo e consistente da API
     return response.status(201).json({
       status: 'success',
-      message: 'DANFE processado e produtos salvos com sucesso!',
+      message: 'DANFE processado e produtos analisados com sucesso!',
       data: {
-        invoice,
-        products,
+        invoice: extractedData,
+        processedProducts,
+        suggestions,
       },
     });
   }
