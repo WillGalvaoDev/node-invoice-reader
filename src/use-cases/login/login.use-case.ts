@@ -22,6 +22,8 @@ export class LoginUseCase {
     // 1. Busca o usuário pelo e-mail
     const user = await this.userRepository.findByEmail(email);
 
+    console.log('👤 [LoginUseCase] Usuário encontrado no banco:', user);
+
     // Mensagem genérica por segurança para evitar enumeração de contas
     if (!user) {
       throw new Error('Invalid email or password.');

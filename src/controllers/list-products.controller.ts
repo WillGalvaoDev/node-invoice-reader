@@ -12,7 +12,13 @@ export class ListProductsController {
       throw new AppError('Usuário não autenticado.', 401);
     }
 
-    const products = await this.listProductsUseCase.execute({ userId });
+    const { stockId, companyId } = request.query;
+
+    const products = await this.listProductsUseCase.execute({
+      userId,
+      stockId: typeof stockId === 'string' ? stockId : undefined,
+      companyId: typeof companyId === 'string' ? companyId : undefined,
+    });
 
     return response.status(200).json({
       status: 'success',
