@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ensureAuthenticated } from './middlewares/ensure-authenticated.js';
+import { uploadRateLimiter } from './middlewares/upload-rate-limiter.js';
 import multer from 'multer';
 import { RegisterUserController } from './controllers/register-user.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
@@ -77,10 +78,11 @@ const createCompanyController = new CreateCompanyController(createCompanyUseCase
 
 // ROTAS
 routes.post(
-  '/invoices/upload', 
-  upload.single('file'), 
-  ensureAuthenticated, 
-  uploadInvoiceController.handle.bind(uploadInvoiceController)
+  '/invoices/upload',
+  ensureAuthenticated,  // 1º: Valida o token do usuário (se falhar, para aqui)
+  uploadRateLimiter,    // 2º: Checa limite de requisições por usuário/IP (se exceder, para aqui)
+  upload.single('file'),// 3º: Só grava o arquivo em disk/tmp se passou na auth e no rate limit
+  uploadInvoiceController.handle.bind(uploadInvoiceController) // 4º: Processa a regra
 );
 
 routes.post('/users', (req, res) => {
