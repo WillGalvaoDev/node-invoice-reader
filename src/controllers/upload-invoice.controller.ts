@@ -1,5 +1,6 @@
+// src/controllers/upload-invoice.controller.ts
 import type { Request, Response } from 'express';
-import type { ReadInvoiceUseCase } from '../use-cases/read-invoice/read-invoice.use-case.js';
+import { ReadInvoiceUseCase } from '../use-cases/read-invoice/read-invoice.use-case.js';
 import { AppError } from '../errors/app-error.js';
 
 export class UploadInvoiceController {
@@ -12,21 +13,21 @@ export class UploadInvoiceController {
     }
 
     // 2. Valida se o ID do estoque veio no body da requisição
-    const { stockId } = request.body;
+    const { stockId, companyId } = request.body;
 
     if (!stockId) {
       throw new AppError('ID do estoque (stockId) é obrigatório.', 400);
     }
 
     const filePath = request.file.path;
-    // Pega o ID do usuário injetado pelo middleware ensureAuthenticated
     const userId = request.user?.id;
 
-    // 3. Executa o Use Case (Gemini OCR + Upsert por código + Sugestão por IA + Limpeza de arquivo)
+    // 3. Executa o Use Case
     const { extractedData, processedProducts, suggestions } = await this.readInvoiceUseCase.execute({
       filePath,
       stockId,
       userId,
+      companyId,
     });
 
     // 4. Retorna no padrão limpo e consistente da API
