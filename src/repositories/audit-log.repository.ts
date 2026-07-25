@@ -1,8 +1,13 @@
-export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'READ';
+export type AuditAction = 
+  | 'CREATE' 
+  | 'UPDATE' 
+  | 'DELETE' 
+  | 'READ' 
+  | 'UNAUTHORIZED_ACCESS'; // 👈 Adicionado evento explícito de segurança
 
 export interface IAuditLog {
   id?: string;
-  action: AuditAction; // Em vez de string genérica
+  action: AuditAction;
   entity: string;
   entityId?: string | null;
   details?: string | null;

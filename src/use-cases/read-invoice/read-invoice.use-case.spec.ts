@@ -256,19 +256,29 @@ describe('ReadInvoiceUseCase', () => {
     );
   });
 
-  it('deve lançar AppError e deletar o arquivo temporário quando o estoque informado não existir ou não for encontrado', async () => {
-    stockRepositoryMock.findById.mockResolvedValueOnce(null);
+  it('deve lançar AppError, registrar log de auditoria de falha e deletar o arquivo temporário quando o estoque informado não existir ou não for encontrado', async () => {
+  stockRepositoryMock.findById.mockResolvedValueOnce(null);
 
-    await expect(
-      sut.execute({
-        filePath: '/path/nota.png',
-        stockId: 'unauthorized-stock-id',
-        userId: 'user-any-id',
-      })
-    ).rejects.toThrow('Acesso não autorizado ao estoque informado.');
+  await expect(
+    sut.execute({
+      filePath: '/path/nota.png',
+      stockId: 'unauthorized-stock-id',
+      userId: 'user-any-id',
+    })
+  ).rejects.toThrow('Acesso não autorizado ao estoque informado.');
 
-    expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
-    expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
-    expect(productRepositoryMock.save).not.toHaveBeenCalled();
-  });
+  // 🎯 Teste exige a ação precisa de segurança
+  expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action: 'UNAUTHORIZED_ACCESS',
+      entity: 'INVOICE',
+      userId: 'user-any-id',
+      details: expect.stringContaining('unauthorized-stock-id'),
+    })
+  );
+
+  expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
+  expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
+  expect(productRepositoryMock.save).not.toHaveBeenCalled();
+});
 });

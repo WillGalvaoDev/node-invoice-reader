@@ -2,7 +2,7 @@ import type { IStorageProvider } from '../../providers/storage.provider.js';
 import type { IAiProvider, IDanfeExtractResult, ISimilarityMatch } from '../../providers/ai.provider.js';
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
-import type { IStockRepository } from '../../repositories/stock.repository.js'; // 👈 1. Import do Repositório
+import type { IStockRepository } from '../../repositories/stock.repository.js';
 import { AppError } from '../../errors/app-error.js';
 
 interface IReadInvoiceRequest {
@@ -31,7 +31,7 @@ export class ReadInvoiceUseCase {
     private readonly aiProvider: IAiProvider,
     private readonly productRepository: IProductRepository,
     private readonly auditLogRepository: IAuditLogRepository,
-    private readonly stockRepository: IStockRepository // 👈 2. Injeção da dependência
+    private readonly stockRepository: IStockRepository
   ) {}
 
   private sanitizeString(input: string): string {
@@ -44,12 +44,20 @@ export class ReadInvoiceUseCase {
 
   async execute({ filePath, stockId, userId, companyId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
-      // 🔒 3. VALIDAÇÃO DE AUTORIZAÇÃO / EXISTÊNCIA DO ESTOQUE
+      // 🔒 VALIDAÇÃO DE AUTORIZAÇÃO / EXISTÊNCIA DO ESTOQUE
       const stockExists = await this.stockRepository.findById(stockId);
 
-      if (!stockExists) {
-        throw new AppError('Acesso não autorizado ao estoque informado.', 403);
-      }
+if (!stockExists) {
+  await this.auditLogRepository.create({
+    action: 'UNAUTHORIZED_ACCESS',
+    entity: 'INVOICE',
+    details: `Tentativa de acesso negada ao estoque: ${stockId}`,
+    ...(userId && { userId }),
+    ...(companyId && { companyId }),
+  });
+
+  throw new AppError('Acesso não autorizado ao estoque informado.', 403);
+}
 
       // 1. Extrai os dados da nota fiscal via Gemini OCR
       const extractedData = await this.aiProvider.extractDanfeData(filePath);

@@ -116,7 +116,8 @@ enum AuditAction {
   CREATE
   UPDATE
   DELETE
-  READ_INVOICE
+  READ
+  UNAUTHORIZED_ACCESS // 👈 Novo valor no Enum
 }
 
 model AuditLog {
