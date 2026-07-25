@@ -5,12 +5,14 @@ import type { IStorageProvider } from '../../providers/storage.provider.js';
 import type { IAiProvider, IDanfeExtractResult } from '../../providers/ai.provider.js';
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
+import type { IStockRepository } from '../../repositories/stock.repository.js';
 
 describe('ReadInvoiceUseCase', () => {
   let storageProviderMock: Mocked<IStorageProvider>;
   let aiProviderMock: Mocked<IAiProvider>;
   let productRepositoryMock: Mocked<IProductRepository>;
   let auditLogRepositoryMock: Mocked<IAuditLogRepository>;
+  let stockRepositoryMock: Mocked<IStockRepository>;
   let sut: ReadInvoiceUseCase;
 
   const mockAiResult: IDanfeExtractResult = {
@@ -65,6 +67,16 @@ describe('ReadInvoiceUseCase', () => {
       delete: vi.fn().mockResolvedValue(undefined)
     } as unknown as Mocked<IProductRepository>;
 
+    stockRepositoryMock = {
+      findById: vi.fn().mockResolvedValue({
+        id: 'stock-1',
+        name: 'Estoque Principal',
+        companyId: 'company-1',
+      }),
+      findByCompanyId: vi.fn().mockResolvedValue([]),
+      create: vi.fn()
+    } as unknown as Mocked<IStockRepository>;
+
     auditLogRepositoryMock = {
       create: vi.fn().mockResolvedValue({ id: 'log-1', action: 'CREATE', entity: 'INVOICE' }),
       findByCompanyId: vi.fn().mockResolvedValue([]),
@@ -75,7 +87,8 @@ describe('ReadInvoiceUseCase', () => {
       storageProviderMock,
       aiProviderMock,
       productRepositoryMock,
-      auditLogRepositoryMock
+      auditLogRepositoryMock,
+      stockRepositoryMock
     );
   });
 
@@ -122,17 +135,15 @@ describe('ReadInvoiceUseCase', () => {
       userId: 'user-any-id'
     };
 
-    // Mocka para encontrar o primeiro item pelo código
-    productRepositoryMock.findByCode.mockImplementation((code, stockId) => {
+    productRepositoryMock.findByCode.mockImplementation((code) => {
       if (code === '0982') return Promise.resolve(existingProduct);
       return Promise.resolve(null);
     });
 
     const result = await sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' });
 
-    // O primeiro item deve fazer update e o segundo deve fazer save
     expect(productRepositoryMock.update).toHaveBeenCalledWith('existing-id-1', {
-      quantity: 60, // 10 existentes + 50 da nota
+      quantity: 60,
       unitPrice: 2.50,
       totalPrice: 125.00,
       description: 'PARAF SEXTAVADO 1/4 X 2'
@@ -158,7 +169,6 @@ describe('ReadInvoiceUseCase', () => {
 
     productRepositoryMock.findByStockId.mockResolvedValue([similarProduct]);
 
-    // Simula a IA dizendo que o 1º produto da nota é similar ao produto do estoque
     aiProviderMock.findSimilarProduct.mockImplementation((desc) => {
       if (desc.includes('PARAF')) {
         return Promise.resolve({
@@ -175,8 +185,90 @@ describe('ReadInvoiceUseCase', () => {
     expect(result.suggestions).toHaveLength(1);
     expect(result.suggestions[0]?.suggestedProduct.id).toBe('similar-id');
     expect(result.suggestions[0]?.confidence).toBe(0.88);
-    // Apenas 1 produto criado direto (o segundo item), pois o primeiro virou sugestão
     expect(productRepositoryMock.save).toHaveBeenCalledTimes(1);
     expect(auditLogRepositoryMock.create).toHaveBeenCalled();
+  });
+
+  it('deve lançar AppError e deletar o arquivo temporário quando a IA retornar uma estrutura inválida ou sem produtos', async () => {
+    const invalidAiResult = {
+      ...mockAiResult,
+      products: []
+    };
+
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce(invalidAiResult as unknown as IDanfeExtractResult);
+
+    await expect(
+      sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' })
+    ).rejects.toThrow('Falha ao extrair produtos do DANFE. Nenhum item válido encontrado.');
+
+    expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
+    expect(productRepositoryMock.save).not.toHaveBeenCalled();
+  });
+
+  it('deve rejeitar produtos com valores ou quantidades negativas/zeradas retornadas pela IA', async () => {
+    const maliciousAiResult: IDanfeExtractResult = {
+      ...mockAiResult,
+      products: [
+        {
+          code: 'MAL-01',
+          description: 'PRODUTO COM QUANTIDADE NEGATIVA',
+          quantity: -10,
+          unitMeasurement: 'UN',
+          unitPrice: 5.00,
+          totalPrice: -50.00
+        }
+      ]
+    };
+
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce(maliciousAiResult);
+
+    await expect(
+      sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' })
+    ).rejects.toThrow('Os produtos do DANFE contêm valores ou quantidades inválidas.');
+
+    expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
+    expect(productRepositoryMock.save).not.toHaveBeenCalled();
+  });
+
+  it('deve sanitizar a descrição dos produtos removendo scripts ou códigos nocivos retornados pela IA', async () => {
+    const promptInjectionAiResult: IDanfeExtractResult = {
+      ...mockAiResult,
+      products: [
+        {
+          code: 'SEC-01',
+          description: '<script>alert("xss")</script> PARAFUSO AÇO INOX -- IGNORE REST',
+          quantity: 10,
+          unitMeasurement: 'UN',
+          unitPrice: 3.00,
+          totalPrice: 30.00
+        }
+      ]
+    };
+
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce(promptInjectionAiResult);
+
+    await sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' });
+
+    expect(productRepositoryMock.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'PARAFUSO AÇO INOX -- IGNORE REST'
+      })
+    );
+  });
+
+  it('deve lançar AppError e deletar o arquivo temporário quando o estoque informado não existir ou não for encontrado', async () => {
+    stockRepositoryMock.findById.mockResolvedValueOnce(null);
+
+    await expect(
+      sut.execute({
+        filePath: '/path/nota.png',
+        stockId: 'unauthorized-stock-id',
+        userId: 'user-any-id',
+      })
+    ).rejects.toThrow('Acesso não autorizado ao estoque informado.');
+
+    expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
+    expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
+    expect(productRepositoryMock.save).not.toHaveBeenCalled();
   });
 });

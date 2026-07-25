@@ -2,6 +2,8 @@ import type { IStorageProvider } from '../../providers/storage.provider.js';
 import type { IAiProvider, IDanfeExtractResult, ISimilarityMatch } from '../../providers/ai.provider.js';
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
+import type { IStockRepository } from '../../repositories/stock.repository.js'; // 👈 1. Import do Repositório
+import { AppError } from '../../errors/app-error.js';
 
 interface IReadInvoiceRequest {
   filePath: string;
@@ -28,69 +30,93 @@ export class ReadInvoiceUseCase {
     private readonly storageProvider: IStorageProvider,
     private readonly aiProvider: IAiProvider,
     private readonly productRepository: IProductRepository,
-    private readonly auditLogRepository: IAuditLogRepository
+    private readonly auditLogRepository: IAuditLogRepository,
+    private readonly stockRepository: IStockRepository // 👈 2. Injeção da dependência
   ) {}
+
+  private sanitizeString(input: string): string {
+    return input
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
   async execute({ filePath, stockId, userId, companyId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
+      // 🔒 3. VALIDAÇÃO DE AUTORIZAÇÃO / EXISTÊNCIA DO ESTOQUE
+      const stockExists = await this.stockRepository.findById(stockId);
+
+      if (!stockExists) {
+        throw new AppError('Acesso não autorizado ao estoque informado.', 403);
+      }
+
       // 1. Extrai os dados da nota fiscal via Gemini OCR
       const extractedData = await this.aiProvider.extractDanfeData(filePath);
+
+      if (!extractedData || !extractedData.products || extractedData.products.length === 0) {
+        throw new AppError('Falha ao extrair produtos do DANFE. Nenhum item válido encontrado.', 400);
+      }
+
+      const hasInvalidNumbers = extractedData.products.some(
+        (p) => Number(p.quantity) <= 0 || Number(p.unitPrice) <= 0 || Number(p.totalPrice) <= 0
+      );
+
+      if (hasInvalidNumbers) {
+        throw new AppError('Os produtos do DANFE contêm valores ou quantidades inválidas.', 400);
+      }
 
       const processedProducts: IProduct[] = [];
       const suggestions: IProductSuggestion[] = [];
 
-      if (extractedData.products && extractedData.products.length > 0) {
-        // Carrega produtos existentes deste estoque uma única vez para otimizar as buscas por IA
-        const existingStockProducts = await this.productRepository.findByStockId(stockId);
+      const existingStockProducts = await this.productRepository.findByStockId(stockId);
 
-        for (const item of extractedData.products) {
-          // CAMADA 1: Busca exata pelo código dentro do mesmo estoque
-          const existingByCode = await this.productRepository.findByCode(item.code, stockId);
+      for (const rawItem of extractedData.products) {
+        const item = {
+          ...rawItem,
+          description: this.sanitizeString(rawItem.description),
+        };
 
-          if (existingByCode && existingByCode.id) {
-            // Upsert: soma a quantidade e atualiza os preços
-            const updatedProduct = await this.productRepository.update(existingByCode.id, {
-              quantity: existingByCode.quantity + item.quantity,
-              unitPrice: item.unitPrice,
-              totalPrice: item.totalPrice,
-              description: item.description,
-            });
-            processedProducts.push(updatedProduct);
-            continue;
-          }
+        const existingByCode = await this.productRepository.findByCode(item.code, stockId);
 
-          // CAMADA 2: Similaridade semântica via IA com produtos do mesmo estoque
-          const similarityMatch: ISimilarityMatch | null =
-            await this.aiProvider.findSimilarProduct(item.description, existingStockProducts);
-
-          if (similarityMatch) {
-            // Guarda para sugestão do usuário no Front-end
-            suggestions.push({
-              invoiceItem: item,
-              suggestedProduct: similarityMatch.product,
-              confidence: similarityMatch.confidence,
-              reason: similarityMatch.reason,
-            });
-            continue;
-          }
-
-          // CAMADA 3: Não encontrou match nem por código nem por IA -> Cria novo produto
-         const newProduct = await this.productRepository.save({
-  code: item.code,
-  description: item.description,
-  quantity: Number(item.quantity),
-  unitMeasurement: item.unitMeasurement,
-  unitPrice: Number(item.unitPrice),
-  totalPrice: Number(item.totalPrice),
-  stockId,
-  userId: userId ?? null, // 👈 Trata undefined de forma determinística
-});
-
-          processedProducts.push(newProduct);
+        if (existingByCode && existingByCode.id) {
+          const updatedProduct = await this.productRepository.update(existingByCode.id, {
+            quantity: existingByCode.quantity + Number(item.quantity),
+            unitPrice: Number(item.unitPrice),
+            totalPrice: Number(item.totalPrice),
+            description: item.description,
+          });
+          processedProducts.push(updatedProduct);
+          continue;
         }
+
+        const similarityMatch: ISimilarityMatch | null =
+          await this.aiProvider.findSimilarProduct(item.description, existingStockProducts);
+
+        if (similarityMatch) {
+          suggestions.push({
+            invoiceItem: item,
+            suggestedProduct: similarityMatch.product,
+            confidence: similarityMatch.confidence,
+            reason: similarityMatch.reason,
+          });
+          continue;
+        }
+
+        const newProduct = await this.productRepository.save({
+          code: item.code,
+          description: item.description,
+          quantity: Number(item.quantity),
+          unitMeasurement: item.unitMeasurement,
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.totalPrice),
+          stockId,
+          userId: userId ?? null,
+        });
+
+        processedProducts.push(newProduct);
       }
 
-      // 2. Grava o Log de Auditoria
       await this.auditLogRepository.create({
         action: 'CREATE',
         entity: 'INVOICE',
@@ -106,7 +132,6 @@ export class ReadInvoiceUseCase {
         suggestions,
       };
     } finally {
-      // Remoção garantida do arquivo temporário
       console.log(`[Use Case] Tentando deletar arquivo em: ${filePath}`);
       try {
         await this.storageProvider.deleteFile(filePath);
