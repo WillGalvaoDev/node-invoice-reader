@@ -23,28 +23,30 @@ export async function ensureAuthenticated(
   }
 
   try {
-    // 3. Valida o token
-    const tokenProvider = new JoseTokenProvider();
-    const decoded = await tokenProvider.verifyToken(token);
+  const tokenProvider = new JoseTokenProvider();
+  const decoded = await tokenProvider.verifyToken(token);
 
-    if (!decoded || !decoded.sub) {
-      throw new AppError('JWT token inválido.', 401);
-    }
+ 
 
-    // 🔒 4. VALIDAÇÃO ADICIONAL: Verifica se o usuário realmente existe no banco
-    const userRepository = new PrismaUserRepository();
-    const userExists = await userRepository.findById(decoded.sub);
+  if (!decoded || !decoded.sub) {
+    throw new AppError('JWT token inválido.', 401);
+  }
 
-    if (!userExists) {
-      throw new AppError('Usuário não encontrado ou conta removida.', 401);
-    }
+  const userRepository = new PrismaUserRepository();
+  
 
-    // 5. Injeta o ID do usuário na requisição
-    req.user = {
-      id: decoded.sub,
-    };
+  const userExists = await userRepository.findById(decoded.sub);
+  
 
-    return next();
+  if (!userExists) {
+    throw new AppError('Usuário não encontrado ou conta removida.', 401);
+  }
+
+  req.user = {
+    id: decoded.sub,
+  };
+
+  return next();
   } catch (error) {
     // Se for um AppError lançado explicitamente acima (ex: usuário não encontrado), repassa ele
     if (error instanceof AppError) {
