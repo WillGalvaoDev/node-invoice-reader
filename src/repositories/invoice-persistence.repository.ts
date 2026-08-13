@@ -1,4 +1,3 @@
-import type { IAuditLog } from './audit-log.repository.js';
 import type { IProduct } from './product.repository.js';
 
 export interface IInvoiceProductOperation {
@@ -9,7 +8,6 @@ export interface IInvoicePersistencePlan {
   accessKey: string;
   stockId: string;
   operations: IInvoiceProductOperation[];
-  auditLog: IAuditLog;
 }
 
 export interface IInvoicePersistenceRepository {

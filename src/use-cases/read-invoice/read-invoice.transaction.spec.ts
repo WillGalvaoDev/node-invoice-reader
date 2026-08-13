@@ -26,7 +26,9 @@ describe('ReadInvoiceUseCase transaction phases', () => {
     stocks.findByIdForUser.mockResolvedValue({ id: 'stock-1', companyId: 'company-1', name: 'Stock' });
     ai.extractDanfeData.mockResolvedValue(invoice);
     ai.findSimilarProduct.mockResolvedValue(null);
-    products.findByStockId.mockResolvedValue([]);
+    products.findByStockId.mockResolvedValue([
+      { id: 'candidate', code: 'C', description: 'Candidate', stockId: 'stock-1' },
+    ]);
     products.findByCode.mockResolvedValue(null);
     persistence.persist.mockImplementation(async ({ operations }: { operations: Array<{ product: object }> }) => operations.map(({ product }) => product));
   });
@@ -40,21 +42,24 @@ describe('ReadInvoiceUseCase transaction phases', () => {
     ai.extractDanfeData.mockImplementation(async () => { order.push('extract'); return invoice; });
     ai.findSimilarProduct.mockImplementation(async () => { order.push('similarity'); return null; });
     persistence.persist.mockImplementation(async ({ operations }: { operations: unknown[] }) => { order.push('transaction'); return operations; });
+    audit.create.mockImplementation(async (log: object) => { order.push('audit'); return log; });
 
     await makeSut().execute({ filePath: '/tmp/invoice', mimeType: 'application/pdf', stockId: 'stock-1', userId: 'owner-1' });
 
-    expect(order).toEqual(['extract', 'similarity', 'similarity', 'transaction']);
+    expect(order).toEqual(['extract', 'similarity', 'similarity', 'transaction', 'audit']);
   });
 
-  it('envia todos os itens e auditoria para uma única persistência', async () => {
+  it('envia todos os itens para uma única persistência e audita somente depois do sucesso', async () => {
     await makeSut().execute({ filePath: '/tmp/invoice', mimeType: 'application/pdf', stockId: 'stock-1', userId: 'owner-1' });
 
     expect(persistence.persist).toHaveBeenCalledOnce();
     expect(persistence.persist.mock.calls[0]?.[0].operations).toHaveLength(2);
-    expect(persistence.persist.mock.calls[0]?.[0].auditLog).toEqual(expect.objectContaining({ action: 'CREATE', entity: 'INVOICE' }));
+    expect(audit.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'CREATE', entity: 'INVOICE', companyId: 'company-1',
+    }));
     expect(products.save).not.toHaveBeenCalled();
     expect(products.update).not.toHaveBeenCalled();
-    expect(audit.create).not.toHaveBeenCalled();
+    expect(audit.create).toHaveBeenCalledOnce();
   });
 
   it('propaga falha transacional sem realizar escrita por outro caminho', async () => {

@@ -1,12 +1,18 @@
 import express from 'express';
-import cors from 'cors';
 import { routes } from './routes.js';
 import { errorHandler } from './middlewares/error-handler.js';
 import { env } from './config/env.js';
+import { configureTrustProxy } from './config/trust-proxy.js';
+import { requestIdMiddleware } from './middlewares/request-id.js';
+import { logger } from './infra/logger.js';
+import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
 
 const app = express();
 
-app.use(cors());
+configureTrustProxy(app, env.TRUST_PROXY_HOPS);
+app.use(requestIdMiddleware);
+
+app.use(...createHttpSecurityMiddlewares(env.CORS_ALLOWED_ORIGINS));
 
 // Middleware para decodificar JSON no corpo das requisições
 app.use(express.json());
@@ -16,5 +22,5 @@ app.use(routes);
 app.use(errorHandler);
 
 app.listen(env.PORT, () => {
-  console.log(`🚀 Servidor HTTP do DocScan rodando na porta ${env.PORT}!`);
+  logger.info('HTTP server started', { port: env.PORT });
 });

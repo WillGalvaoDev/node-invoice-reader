@@ -1,4 +1,4 @@
-import { describe, beforeEach, it, expect } from 'vitest';
+import { describe, beforeEach, it, expect, vi } from 'vitest';
 import { CreateCompanyUseCase } from './create-company.use-case.js';
 import { InMemoryCompanyRepository } from '../../repositories/in-memory/in-memory-company.repository.js';
 import { InMemoryStockRepository } from '../../repositories/in-memory/in-memory-stock.repository.js';
@@ -81,5 +81,27 @@ describe('CreateCompanyUseCase', () => {
         ownerId: 'user-2',
       })
     ).rejects.toBeInstanceOf(AppError);
+  });
+
+  it('mantém company e stock criados quando o audit falha e registra somente contexto seguro', async () => {
+    const failingAudit = {
+      create: vi.fn().mockRejectedValue(new Error('database details')),
+      findByCompanyId: vi.fn(),
+      findByUserId: vi.fn(),
+    };
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const useCase = new CreateCompanyUseCase(companyRepository, stockRepository, failingAudit, logger);
+
+    const result = await useCase.execute({
+      name: 'Empresa Audit Isolado', cnpj: '98765432000199', ownerId: 'user-1', requestId: 'company-request',
+    });
+
+    expect(result.company.id).toBeDefined();
+    expect(result.defaultStock.companyId).toBe(result.company.id);
+    expect(logger.error).toHaveBeenCalledWith('Failed to persist audit log', {
+      requestId: 'company-request', action: 'CREATE', entity: 'COMPANY', error: { name: 'Error' },
+    });
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('database details');
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('98765432000199');
   });
 });

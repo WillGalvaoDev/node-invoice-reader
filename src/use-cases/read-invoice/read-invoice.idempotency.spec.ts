@@ -45,8 +45,8 @@ describe('ReadInvoiceUseCase idempotency', () => {
       accessKey,
       stockId: 'stock-1',
       operations: expect.any(Array),
-      auditLog: expect.objectContaining({ entity: 'INVOICE', entityId: accessKey }),
     }));
+    expect(audit.create).toHaveBeenCalledWith(expect.objectContaining({ entity: 'INVOICE', entityId: accessKey, companyId: 'company-1' }));
   });
 
   it('segunda submissao e uma condicao de dominio 409 e nao aplica nova entrada', async () => {

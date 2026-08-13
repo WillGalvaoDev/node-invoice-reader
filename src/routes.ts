@@ -30,6 +30,14 @@ import { PrismaCompanyRepository } from './repositories/prisma-company.repositor
 import { PrismaStockRepository } from './repositories/prisma-stock.repository.js';
 import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoice-persistence.repository.js';
 import { invoiceUpload } from './middlewares/invoice-upload.js';
+import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
+import { validateBody, validateQuery } from './middlewares/validate-request.js';
+import {
+  createCompanyBodySchema,
+  listProductsQuerySchema,
+  loginBodySchema,
+  registerUserBodySchema,
+} from './schemas/http.schemas.js';
 
 export const routes = Router();
 
@@ -86,12 +94,12 @@ routes.post(
   uploadInvoiceController.handle.bind(uploadInvoiceController) // 4º: Processa a regra
 );
 
-routes.post('/users', registerUserController.handle.bind(registerUserController));
+routes.post('/users', userRegistrationRateLimiter, validateBody(registerUserBodySchema), registerUserController.handle.bind(registerUserController));
 
 // ROTA DE LOGIN
-routes.post('/login', loginController.handle.bind(loginController));
+routes.post('/login', loginRateLimiter, validateBody(loginBodySchema), loginController.handle.bind(loginController));
 
-routes.get('/products', ensureAuthenticated, listProductsController.handle.bind(listProductsController));
+routes.get('/products', ensureAuthenticated, validateQuery(listProductsQuerySchema), listProductsController.handle.bind(listProductsController));
 
 // ROTA DE CRIAÇÃO DE EMPRESA
-routes.post('/companies', ensureAuthenticated, createCompanyController.handle.bind(createCompanyController));
+routes.post('/companies', ensureAuthenticated, validateBody(createCompanyBodySchema), createCompanyController.handle.bind(createCompanyController));

@@ -36,6 +36,29 @@ function parseIntegerInRange(
   return parsed;
 }
 
+function parseCorsAllowedOrigins(value: string | undefined): string[] {
+  if (value === undefined || value.trim() === '') return [];
+
+  return [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+    if (entry === '*') throw new Error('Variável de ambiente inválida: CORS_ALLOWED_ORIGINS');
+
+    let parsed: URL;
+    try {
+      parsed = new URL(entry);
+    } catch {
+      throw new Error('Variável de ambiente inválida: CORS_ALLOWED_ORIGINS');
+    }
+
+    const isHttpOrigin = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const hasOnlyOrigin = parsed.pathname === '/' && !parsed.search && !parsed.hash;
+    if (!isHttpOrigin || !hasOnlyOrigin || parsed.username || parsed.password || parsed.origin === 'null') {
+      throw new Error('Variável de ambiente inválida: CORS_ALLOWED_ORIGINS');
+    }
+
+    return parsed.origin;
+  }))];
+}
+
 export function createEnv(environment: Environment) {
   return {
     DATABASE_URL: required(environment, 'DATABASE_URL'),
@@ -44,6 +67,8 @@ export function createEnv(environment: Environment) {
     PORT: parsePort(environment.PORT),
     GEMINI_TIMEOUT_MS: parseIntegerInRange(environment.GEMINI_TIMEOUT_MS, 30_000, 'GEMINI_TIMEOUT_MS', 1_000, 30_000),
     GEMINI_MAX_ATTEMPTS: parseIntegerInRange(environment.GEMINI_MAX_ATTEMPTS, 2, 'GEMINI_MAX_ATTEMPTS', 1, 2),
+    TRUST_PROXY_HOPS: parseIntegerInRange(environment.TRUST_PROXY_HOPS, 0, 'TRUST_PROXY_HOPS', 0, 10),
+    CORS_ALLOWED_ORIGINS: parseCorsAllowedOrigins(environment.CORS_ALLOWED_ORIGINS),
   };
 }
 

@@ -1,4 +1,4 @@
-import type { AuditAction, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { ProductMapper } from '../mappers/product.mapper.js';
 import { prisma } from '../infra/prisma.js';
 import type { IInvoicePersistencePlan, IInvoicePersistenceRepository } from './invoice-persistence.repository.js';
@@ -6,7 +6,7 @@ import type { IProduct } from './product.repository.js';
 import { AppError } from '../errors/app-error.js';
 
 export class PrismaInvoicePersistenceRepository implements IInvoicePersistenceRepository {
-  async persist({ accessKey, stockId, operations, auditLog }: IInvoicePersistencePlan): Promise<IProduct[]> {
+  async persist({ accessKey, stockId, operations }: IInvoicePersistencePlan): Promise<IProduct[]> {
     return prisma.$transaction(async (transaction) => {
       const products: IProduct[] = [];
 
@@ -26,17 +26,6 @@ export class PrismaInvoicePersistenceRepository implements IInvoicePersistenceRe
         const persisted = await this.upsertProduct(transaction, product);
         products.push(ProductMapper.toDomain(persisted));
       }
-
-      await transaction.auditLog.create({
-        data: {
-          action: auditLog.action as AuditAction,
-          entity: auditLog.entity,
-          ...(auditLog.entityId && { entityId: auditLog.entityId }),
-          ...(auditLog.details && { details: auditLog.details }),
-          ...(auditLog.userId && { userId: auditLog.userId }),
-          ...(auditLog.companyId && { companyId: auditLog.companyId }),
-        },
-      });
 
       return products;
     });

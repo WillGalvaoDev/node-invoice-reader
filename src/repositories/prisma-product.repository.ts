@@ -17,7 +17,6 @@ export class PrismaProductRepository implements IProductRepository {
       },
     });
 
-    console.log(`💾 [Prisma Banco Real] Produto persistido com sucesso: ${createdProduct.description}`);
     return ProductMapper.toDomain(createdProduct);
   }
 
@@ -32,20 +31,15 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async findByUserId(userId: string): Promise<IProduct[]> {
-    console.log(`🛢️ [Prisma] Buscando produtos onde userId === "${userId}"`);
-    
     const products = await prisma.product.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`🛢️ [Prisma] Produtos encontrados no banco: ${products.length}`);
     return products.map(ProductMapper.toDomain);
   }
 
   async findByStockId(stockId: string, userId?: string): Promise<IProduct[]> {
-    console.log(`🛢️ [Prisma] Buscando produtos com stockId = "${stockId}" e userId = "${userId}"`);
-    
     const products = await prisma.product.findMany({
       where: {
         stockId,
@@ -54,13 +48,10 @@ export class PrismaProductRepository implements IProductRepository {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`🛢️ [Prisma] Produtos encontrados por estoque: ${products.length}`);
     return products.map(ProductMapper.toDomain);
   }
 
   async findByCompanyId(companyId: string, userId?: string): Promise<IProduct[]> {
-    console.log(`🛢️ [Prisma] Buscando produtos com companyId = "${companyId}" e userId = "${userId}"`);
-    
     const products = await prisma.product.findMany({
       where: {
         stock: {
@@ -71,7 +62,6 @@ export class PrismaProductRepository implements IProductRepository {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`🛢️ [Prisma] Produtos encontrados por empresa: ${products.length}`);
     return products.map(ProductMapper.toDomain);
   }
 

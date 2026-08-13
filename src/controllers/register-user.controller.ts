@@ -8,15 +8,11 @@ export class RegisterUserController {
   async handle(req: Request, res: Response): Promise<Response> {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Missing name, email, or password.' });
-    }
-
     try {
       const user = await this.registerUserUseCase.execute({ name, email, password });
       return res.status(201).json(user);
-    } catch (error: any) {
-      if (error.message === 'User already exists.') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'User already exists.') {
         return res.status(409).json({ error: error.message });
       }
       return res.status(500).json({ error: 'Internal server error.' });

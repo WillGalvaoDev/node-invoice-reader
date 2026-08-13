@@ -13,7 +13,7 @@ export interface IProductItemResult {
 export interface ISupplierResult {
   cnpj: string;
   name: string;
-  stateRegistration: string; // Inscrição Estadual (IE)
+  stateRegistration?: string | undefined; // Inscrição Estadual (IE), quando presente
 }
 
 export interface IDanfeExtractResult {

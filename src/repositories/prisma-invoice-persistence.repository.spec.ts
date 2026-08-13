@@ -21,11 +21,11 @@ describe('PrismaInvoicePersistenceRepository', () => {
     product: { code, description: code, quantity, unitMeasurement: 'UN', unitPrice: 2, totalPrice: 2, stockId: 'stock-1', userId: 'user-1' },
   });
 
-  it('usa um transaction client para todos os itens e auditoria com incremento atômico', async () => {
+  it('usa um transaction client para identidade e todos os itens com incremento atômico', async () => {
     const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
     await new PrismaInvoicePersistenceRepository().persist({
       accessKey: '1'.repeat(44), stockId: 'stock-1',
-      operations: [product('A', 2), product('B', 3)], auditLog: { action: 'CREATE', entity: 'INVOICE' },
+      operations: [product('A', 2), product('B', 3)],
     });
 
     expect(prismaMock.$transaction).toHaveBeenCalledOnce();
@@ -36,7 +36,18 @@ describe('PrismaInvoicePersistenceRepository', () => {
       where: { stockId_code: { stockId: 'stock-1', code: 'A' } },
       update: expect.objectContaining({ quantity: { increment: 2 } }),
     }));
-    expect(tx.auditLog.create).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('mantém somente identidade e itens na transação principal', async () => {
+    const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
+    await new PrismaInvoicePersistenceRepository().persist({
+      accessKey: '9'.repeat(44), stockId: 'stock-1', operations: [product('A')],
+    });
+
+    expect(tx.processedInvoice.create).toHaveBeenCalledOnce();
+    expect(tx.product.upsert).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('propaga falha do item N pelo callback para rollback e não grava auditoria', async () => {
@@ -45,7 +56,7 @@ describe('PrismaInvoicePersistenceRepository', () => {
 
     await expect(new PrismaInvoicePersistenceRepository().persist({
       accessKey: '1'.repeat(44), stockId: 'stock-1',
-      operations: [product('A'), product('B')], auditLog: { action: 'CREATE', entity: 'INVOICE' },
+      operations: [product('A'), product('B')],
     })).rejects.toThrow('item N failed');
 
     expect(tx.auditLog.create).not.toHaveBeenCalled();
@@ -61,8 +72,8 @@ describe('PrismaInvoicePersistenceRepository', () => {
     const repository = new PrismaInvoicePersistenceRepository();
 
     await Promise.all([
-      repository.persist({ accessKey: '1'.repeat(44), stockId: 'stock-1', operations: [product('A', 5)], auditLog: { action: 'CREATE', entity: 'INVOICE' } }),
-      repository.persist({ accessKey: '2'.repeat(44), stockId: 'stock-1', operations: [product('A', 7)], auditLog: { action: 'CREATE', entity: 'INVOICE' } }),
+      repository.persist({ accessKey: '1'.repeat(44), stockId: 'stock-1', operations: [product('A', 5)] }),
+      repository.persist({ accessKey: '2'.repeat(44), stockId: 'stock-1', operations: [product('A', 7)] }),
     ]);
 
     expect(quantity).toBe(22);
@@ -74,7 +85,6 @@ describe('PrismaInvoicePersistenceRepository', () => {
 
     await expect(new PrismaInvoicePersistenceRepository().persist({
       accessKey: '1'.repeat(44), stockId: 'stock-1', operations: [product('A')],
-      auditLog: { action: 'CREATE', entity: 'INVOICE' },
     })).rejects.toMatchObject({ statusCode: 409 });
 
     expect(tx.product.upsert).not.toHaveBeenCalled();
@@ -103,7 +113,6 @@ describe('PrismaInvoicePersistenceRepository', () => {
     const repository = new PrismaInvoicePersistenceRepository();
     const plan = {
       accessKey: '1'.repeat(44), stockId: 'stock-1', operations: [product('A')],
-      auditLog: { action: 'CREATE' as const, entity: 'INVOICE' },
     };
 
     await expect(repository.persist(plan)).rejects.toThrow('item failed');
@@ -124,7 +133,6 @@ describe('PrismaInvoicePersistenceRepository', () => {
     const repository = new PrismaInvoicePersistenceRepository();
     const plan = {
       accessKey: '1'.repeat(44), stockId: 'stock-1', operations: [product('A', 5)],
-      auditLog: { action: 'CREATE' as const, entity: 'INVOICE' },
     };
 
     const results = await Promise.allSettled([repository.persist(plan), repository.persist(plan)]);

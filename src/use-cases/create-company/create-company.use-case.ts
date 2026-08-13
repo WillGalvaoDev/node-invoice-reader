@@ -2,11 +2,14 @@ import type { ICompanyRepository, ICompany } from '../../repositories/company.re
 import type { IStockRepository, IStock } from '../../repositories/stock.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import { AppError } from '../../errors/app-error.js';
+import { logger, type Logger } from '../../infra/logger.js';
+import { persistAuditBestEffort } from '../best-effort-audit.js';
 
 interface ICreateCompanyRequest {
   name: string;
   cnpj: string;
   ownerId: string;
+  requestId?: string | undefined;
 }
 
 interface ICreateCompanyResponse {
@@ -18,10 +21,11 @@ export class CreateCompanyUseCase {
   constructor(
     private readonly companyRepository: ICompanyRepository,
     private readonly stockRepository: IStockRepository,
-    private readonly auditLogRepository: IAuditLogRepository
+    private readonly auditLogRepository: IAuditLogRepository,
+    private readonly applicationLogger: Logger = logger,
   ) {}
 
-  async execute({ name, cnpj, ownerId }: ICreateCompanyRequest): Promise<ICreateCompanyResponse> {
+  async execute({ name, cnpj, ownerId, requestId }: ICreateCompanyRequest): Promise<ICreateCompanyResponse> {
     if (!name) {
       throw new AppError('O nome da empresa é obrigatório.', 400);
     }
@@ -53,13 +57,18 @@ export class CreateCompanyUseCase {
     });
 
     // 3. Registra o Log de Auditoria
-    await this.auditLogRepository.create({
-      action: 'CREATE',
-      entity: 'COMPANY',
-      entityId: company.id,
-      details: `Empresa "${company.name}" criada com Estoque Principal (ID: ${defaultStock.id}).`,
-      userId: ownerId,
-      companyId: company.id,
+    await persistAuditBestEffort({
+      repository: this.auditLogRepository,
+      logger: this.applicationLogger,
+      requestId,
+      log: {
+        action: 'CREATE',
+        entity: 'COMPANY',
+        entityId: company.id,
+        details: `Empresa "${company.name}" criada com Estoque Principal (ID: ${defaultStock.id}).`,
+        userId: ownerId,
+        companyId: company.id,
+      },
     });
 
     return {

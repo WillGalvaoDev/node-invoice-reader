@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type { ListProductsUseCase } from '../use-cases/list-products/list-products.use-case.ts';
 import { AppError } from '../errors/app-error.js';
+import { listProductsQuerySchema } from '../schemas/http.schemas.js';
 
 export class ListProductsController {
   constructor(private listProductsUseCase: ListProductsUseCase) {}
@@ -12,12 +13,12 @@ export class ListProductsController {
       throw new AppError('Usuário não autenticado.', 401);
     }
 
-    const { stockId, companyId } = request.query;
+    const { stockId, companyId } = listProductsQuerySchema.parse(request.query);
 
     const products = await this.listProductsUseCase.execute({
       userId,
-      stockId: typeof stockId === 'string' ? stockId : undefined,
-      companyId: typeof companyId === 'string' ? companyId : undefined,
+      stockId,
+      companyId,
     });
 
     return response.status(200).json({

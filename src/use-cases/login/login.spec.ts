@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LoginUseCase } from './login.use-case.js';
 import type { IUserRepository, IUser } from '../../repositories/user.repository.js';
 import type { IHashProvider } from '../../providers/hash.provider.js';
@@ -58,6 +58,7 @@ describe('Login Use Case', () => {
   });
 
   it('should be able to authenticate an existing user and return a token', async () => {
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const response = await sut.execute({
       email: 'john@example.com',
       password: 'password123',
@@ -65,6 +66,11 @@ describe('Login Use Case', () => {
 
     expect(response.token).toBeDefined();
     expect(response.token).toContain('mocked-jwt-token-for-user-1');
+    const logged = JSON.stringify(consoleLog.mock.calls);
+    expect(logged).not.toContain('password123');
+    expect(logged).not.toContain('john@example.com');
+    expect(consoleLog).not.toHaveBeenCalled();
+    consoleLog.mockRestore();
   });
 
   it('should not be able to authenticate with wrong password', async () => {

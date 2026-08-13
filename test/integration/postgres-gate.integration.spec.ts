@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma, disconnectPrisma } from '../../src/infra/prisma.js';
 import { PrismaInvoicePersistenceRepository } from '../../src/repositories/prisma-invoice-persistence.repository.js';
 import { PrismaProductRepository } from '../../src/repositories/prisma-product.repository.js';
@@ -55,7 +55,6 @@ function plan(stockId: string, accessKey: string, products: IProduct[]): IInvoic
     accessKey,
     stockId,
     operations: products.map((item) => ({ product: item })),
-    auditLog: { action: 'CREATE', entity: 'INVOICE', entityId: accessKey },
   };
 }
 
@@ -122,7 +121,7 @@ describe('PostgreSQL Integration Gate', () => {
     expect(await prisma.processedInvoice.count({ where: { accessKey } })).toBe(1);
     expect(await prisma.product.count({ where: { stockId: stock.id, code: 'IDEMPOTENT' } })).toBe(1);
     expect(Number((await prisma.product.findUniqueOrThrow({ where: { stockId_code: { stockId: stock.id, code: 'IDEMPOTENT' } } })).quantity)).toBe(6);
-    expect(await prisma.auditLog.count({ where: { entityId: accessKey } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: accessKey } })).toBe(0);
   });
 
   it('expõe a UNIQUE real como P2002 e mantém a tradução de domínio no fluxo normal', async () => {
@@ -140,7 +139,7 @@ describe('PostgreSQL Integration Gate', () => {
   });
 
   it('não persiste identidade nem saldo quando autorização é negada', async () => {
-    const { company, stock } = await seedOwnerAndStock();
+    const { stock } = await seedOwnerAndStock();
     const outsider = await prisma.user.create({
       data: { email: `outsider-${crypto.randomUUID()}@test.local`, name: 'Outsider', password: 'test-hash' },
     });
@@ -158,11 +157,58 @@ describe('PostgreSQL Integration Gate', () => {
     const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
     const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
 
-    await expect(useCase.execute({ filePath: 'controlled-test-file', mimeType: 'image/png', stockId: stock.id, userId: outsider.id, companyId: company.id })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(useCase.execute({ filePath: 'controlled-test-file', mimeType: 'image/png', stockId: stock.id, userId: outsider.id })).rejects.toMatchObject({ statusCode: 403 });
 
     expect(aiCalls).toBe(0);
     expect(await prisma.processedInvoice.count({ where: { accessKey } })).toBe(0);
     expect(await prisma.product.count({ where: { stockId: stock.id } })).toBe(0);
     expect(await prisma.auditLog.count({ where: { action: 'UNAUTHORIZED_ACCESS', userId: outsider.id } })).toBe(1);
+  });
+
+  it('mantém commit e idempotência reais quando o audit pós-operação falha', async () => {
+    const { owner, company, stock } = await seedOwnerAndStock();
+    const accessKey = '80000000000000000000000000000000000000000008';
+    const extracted: IDanfeExtractResult = {
+      accessKey, invoiceNumber: '8', series: '1', issuedAt: new Date(), totalValue: 5,
+      supplier: { cnpj: '1', name: 'Fornecedor' },
+      products: [{ code: 'AUDIT-FAIL', description: 'Produto', quantity: 5, unitPrice: 1, totalPrice: 5, unitMeasurement: 'UN' }],
+    };
+    const ai: IAiProvider = {
+      async extractDanfeData() { return extracted; },
+      async findSimilarProduct() { return null; },
+    };
+    const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
+    const failingAudit = {
+      create: vi.fn().mockRejectedValue(new Error('controlled audit failure')),
+      findByCompanyId: vi.fn(),
+      findByUserId: vi.fn(),
+    };
+    const testLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const useCase = new ReadInvoiceUseCase(
+      storage, ai, new PrismaProductRepository(), failingAudit,
+      new PrismaStockRepository(), persistence, testLogger,
+    );
+
+    await expect(useCase.execute({
+      filePath: 'controlled-success-file', mimeType: 'image/png', stockId: stock.id,
+      userId: owner.id, requestId: 'postgres-audit-failure',
+    })).resolves.toBeDefined();
+
+    expect(await prisma.processedInvoice.count({ where: { accessKey } })).toBe(1);
+    expect(Number((await prisma.product.findUniqueOrThrow({
+      where: { stockId_code: { stockId: stock.id, code: 'AUDIT-FAIL' } },
+    })).quantity)).toBe(5);
+    expect(await prisma.auditLog.count({ where: { entityId: accessKey } })).toBe(0);
+    expect(failingAudit.create).toHaveBeenCalledWith(expect.objectContaining({ companyId: company.id }));
+    expect(testLogger.error).toHaveBeenCalledOnce();
+
+    await expect(useCase.execute({
+      filePath: 'controlled-retry-file', mimeType: 'image/png', stockId: stock.id, userId: owner.id,
+    })).rejects.toMatchObject({ statusCode: 409 });
+    expect(await prisma.processedInvoice.count({ where: { accessKey } })).toBe(1);
+    expect(Number((await prisma.product.findUniqueOrThrow({
+      where: { stockId_code: { stockId: stock.id, code: 'AUDIT-FAIL' } },
+    })).quantity)).toBe(5);
+    expect(failingAudit.create).toHaveBeenCalledOnce();
   });
 });

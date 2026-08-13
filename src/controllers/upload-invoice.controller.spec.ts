@@ -7,7 +7,7 @@ describe('UploadInvoiceController MIME propagation', () => {
     const controller = new UploadInvoiceController({ execute } as any, { deleteFile: vi.fn() } as any);
     const request = {
       file: { path: 'tmp/hash-without-extension', mimetype: 'application/pdf' },
-      body: { stockId: 'stock-1' },
+      body: { stockId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
       user: { id: 'user-1' },
     } as any;
     const response = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() } as any;
@@ -34,5 +34,39 @@ describe('UploadInvoiceController MIME propagation', () => {
 
     expect(deleteFile).toHaveBeenCalledWith('tmp/uploaded-file');
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('rejeita body multipart com stockId de tipo inválido antes do use case e remove o arquivo', async () => {
+    const execute = vi.fn().mockResolvedValue({ extractedData: {}, processedProducts: [], suggestions: [] });
+    const deleteFile = vi.fn().mockResolvedValue(undefined);
+    const controller = new UploadInvoiceController({ execute } as any, { deleteFile } as any);
+    const request = {
+      file: { path: 'tmp/uploaded-file', mimetype: 'image/png' },
+      body: { stockId: { injected: true } },
+      user: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      requestId: 'upload-validation',
+    } as any;
+
+    await expect(controller.handle(request, {} as any)).rejects.toMatchObject({ statusCode: 400 });
+    expect(execute).not.toHaveBeenCalled();
+    expect(deleteFile).toHaveBeenCalledWith('tmp/uploaded-file');
+  });
+
+  it('rejeita companyId redundante no upload em vez de confiar no tenant do cliente', async () => {
+    const execute = vi.fn();
+    const deleteFile = vi.fn().mockResolvedValue(undefined);
+    const controller = new UploadInvoiceController({ execute } as any, { deleteFile } as any);
+    const request = {
+      file: { path: 'tmp/uploaded-file', mimetype: 'image/png' },
+      body: {
+        stockId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        companyId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      },
+      user: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+    } as any;
+
+    await expect(controller.handle(request, {} as any)).rejects.toMatchObject({ statusCode: 400 });
+    expect(execute).not.toHaveBeenCalled();
+    expect(deleteFile).toHaveBeenCalledWith('tmp/uploaded-file');
   });
 });

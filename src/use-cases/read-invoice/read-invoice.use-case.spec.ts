@@ -7,6 +7,7 @@ import type { IProductRepository, IProduct } from '../../repositories/product.re
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
 import type { IInvoicePersistenceRepository } from '../../repositories/invoice-persistence.repository.js';
+import type { Logger } from '../../infra/logger.js';
 
 describe('ReadInvoiceUseCase', () => {
   let storageProviderMock: Mocked<IStorageProvider>;
@@ -15,6 +16,7 @@ describe('ReadInvoiceUseCase', () => {
   let auditLogRepositoryMock: Mocked<IAuditLogRepository>;
   let stockRepositoryMock: Mocked<IStockRepository>;
   let invoicePersistenceMock: Mocked<IInvoicePersistenceRepository>;
+  let loggerMock: Mocked<Logger>;
   let sut: ReadInvoiceUseCase;
 
   const mockAiResult: IDanfeExtractResult = {
@@ -96,13 +98,18 @@ describe('ReadInvoiceUseCase', () => {
       ),
     } as Mocked<IInvoicePersistenceRepository>;
 
+    loggerMock = {
+      debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
+    };
+
     sut = new ReadInvoiceUseCase(
       storageProviderMock,
       aiProviderMock,
       productRepositoryMock,
       auditLogRepositoryMock,
       stockRepositoryMock,
-      invoicePersistenceMock
+      invoicePersistenceMock,
+      loggerMock,
     );
   });
 
@@ -120,13 +127,12 @@ describe('ReadInvoiceUseCase', () => {
       product: { ...mockAiResult.products[0], stockId, userId }
     });
 
-    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].auditLog).toEqual(
-      expect.objectContaining({
-        action: 'CREATE',
-        entity: 'INVOICE',
-        userId
-      })
-    );
+    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'CREATE',
+      entity: 'INVOICE',
+      userId,
+      companyId: 'company-1',
+    }));
 
     expect(result.extractedData.invoiceNumber).toBe('000542');
     expect(result.processedProducts).toHaveLength(2);
@@ -159,7 +165,54 @@ describe('ReadInvoiceUseCase', () => {
     });
 
     expect(productRepositoryMock.update).not.toHaveBeenCalled();
+    expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
     expect(result.processedProducts).toHaveLength(2);
+  });
+
+  it('limita e ordena candidatos do estoque antes de chamar similarity em catálogo grande', async () => {
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce({
+      ...mockAiResult,
+      products: [{
+        code: 'NEW-10', description: 'PARAFUSO SEXTAVADO 10MM', quantity: 1,
+        unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1,
+      }],
+    });
+    const catalog = Array.from({ length: 30 }, (_, index): IProduct => ({
+      id: `product-${String(index).padStart(2, '0')}`,
+      code: `CODE-${index}`,
+      description: index === 23 ? 'Parafuso, sextavado 10mm' : index === 22 ? 'Parafuso sextavado 20mm' : `Item irrelevante ${index}`,
+      quantity: 100,
+      unitMeasurement: 'UN', unitPrice: 999, totalPrice: 999,
+      stockId: index === 29 ? 'other-stock' : 'stock-1',
+    }));
+    productRepositoryMock.findByStockId.mockResolvedValueOnce(catalog);
+
+    await sut.execute({ filePath: '/path/large.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'owner-1' });
+
+    const candidates = aiProviderMock.findSimilarProduct.mock.calls[0]?.[1] ?? [];
+    expect(candidates.length).toBeLessThan(catalog.length);
+    expect(candidates.length).toBeLessThanOrEqual(15);
+    expect(candidates[0]?.id).toBe('product-23');
+    expect(candidates.every((candidate) => candidate.stockId === 'stock-1')).toBe(true);
+  });
+
+  it('não chama similarity quando catálogo grande não possui candidato lexical plausível', async () => {
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce({
+      ...mockAiResult,
+      products: [{
+        code: 'NEW', description: 'COMPRESSOR INDUSTRIAL', quantity: 1,
+        unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1,
+      }],
+    });
+    productRepositoryMock.findByStockId.mockResolvedValueOnce(Array.from({ length: 20 }, (_, index) => ({
+      id: `food-${index}`, code: `FOOD-${index}`, description: `ARROZ TIPO ${index}`,
+      quantity: 1, unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1, stockId: 'stock-1',
+    })));
+
+    await sut.execute({ filePath: '/path/no-match.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'owner-1' });
+
+    expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations).toHaveLength(1);
   });
 
   it('deve gerar uma sugestão de vínculo quando a IA encontrar um produto similar no estoque', async () => {
@@ -304,6 +357,52 @@ describe('ReadInvoiceUseCase', () => {
     expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
   });
 
+  it('deriva companyId do estoque autorizado e trata falha do audit de sucesso como best-effort', async () => {
+    auditLogRepositoryMock.create.mockRejectedValueOnce(new Error('audit database unavailable'));
+
+    await expect(sut.execute({
+      filePath: '/path/success.png',
+      mimeType: 'image/png',
+      stockId: 'stock-1',
+      userId: 'owner-1',
+      requestId: 'request-safe-id',
+    })).resolves.toMatchObject({ processedProducts: expect.any(Array) });
+
+    expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
+    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'CREATE',
+      entity: 'INVOICE',
+      companyId: 'company-1',
+    }));
+    expect(loggerMock.error).toHaveBeenCalledWith('Failed to persist audit log', {
+      requestId: 'request-safe-id',
+      action: 'CREATE',
+      entity: 'INVOICE',
+      error: { name: 'Error' },
+    });
+    expect(JSON.stringify(loggerMock.error.mock.calls)).not.toContain('audit database unavailable');
+    expect(JSON.stringify(loggerMock.error.mock.calls)).not.toContain(mockAiResult.invoiceNumber);
+  });
+
+  it('mantém 403 e bloqueia Gemini quando o audit de acesso negado falha', async () => {
+    stockRepositoryMock.findByIdForUser.mockResolvedValueOnce(null);
+    auditLogRepositoryMock.create.mockRejectedValueOnce(new Error('audit unavailable'));
+
+    await expect(sut.execute({
+      filePath: '/path/denied.png',
+      mimeType: 'image/png',
+      stockId: 'stock-from-another-company',
+      userId: 'outsider-1',
+      requestId: 'denied-request',
+    })).rejects.toMatchObject({ statusCode: 403 });
+
+    expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist).not.toHaveBeenCalled();
+    expect(loggerMock.error).toHaveBeenCalledWith('Failed to persist audit log', expect.objectContaining({
+      requestId: 'denied-request', action: 'UNAUTHORIZED_ACCESS', error: { name: 'Error' },
+    }));
+  });
+
   it.each([
     ['usuário sem vínculo de outra empresa', 'outsider-1'],
     ['collaborator sem canCreate', 'collaborator-without-create'],
@@ -316,7 +415,6 @@ describe('ReadInvoiceUseCase', () => {
         mimeType: 'image/png',
         stockId: 'stock-from-another-company',
         userId,
-        companyId: 'spoofed-company-id',
       })
     ).rejects.toMatchObject({ statusCode: 403 });
 

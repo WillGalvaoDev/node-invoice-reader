@@ -18,11 +18,11 @@ export const uploadRateLimiter = rateLimit({
     return `ip:${ipKeyGenerator(req.ip!)}`;
   },
 
-  handler: (_req, _res, _next) => {
-    throw new AppError(
+  handler: (_req, _res, next) => {
+    next(new AppError(
       'Limite de uploads atingido. Aguarde um minuto antes de enviar novas notas.',
       429,
-    );
+    ));
   },
 });
 

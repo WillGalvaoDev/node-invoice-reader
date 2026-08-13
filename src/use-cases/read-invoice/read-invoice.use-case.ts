@@ -6,13 +6,16 @@ import type { IStockRepository } from '../../repositories/stock.repository.js';
 import { AppError } from '../../errors/app-error.js';
 import type { IInvoicePersistenceRepository, IInvoiceProductOperation } from '../../repositories/invoice-persistence.repository.js';
 import type { DanfeMimeType } from '../../config/upload.js';
+import { logger, type Logger } from '../../infra/logger.js';
+import { persistAuditBestEffort } from '../best-effort-audit.js';
+import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.js';
 
 interface IReadInvoiceRequest {
   filePath: string;
   mimeType: DanfeMimeType;
   stockId: string;
   userId?: string | undefined;
-  companyId?: string | undefined;
+  requestId?: string | undefined;
 }
 
 export interface IProductSuggestion {
@@ -35,7 +38,8 @@ export class ReadInvoiceUseCase {
     private readonly productRepository: IProductRepository,
     private readonly auditLogRepository: IAuditLogRepository,
     private readonly stockRepository: IStockRepository,
-    private readonly invoicePersistenceRepository: IInvoicePersistenceRepository
+    private readonly invoicePersistenceRepository: IInvoicePersistenceRepository,
+    private readonly applicationLogger: Logger = logger,
   ) {}
 
   private sanitizeString(input: string): string {
@@ -46,18 +50,23 @@ export class ReadInvoiceUseCase {
       .trim();
   }
 
-  async execute({ filePath, mimeType, stockId, userId, companyId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
+  async execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
       const authorizedStock = userId
         ? await this.stockRepository.findByIdForUser(stockId, userId)
         : null;
 
       if (!authorizedStock) {
-        await this.auditLogRepository.create({
-          action: 'UNAUTHORIZED_ACCESS',
-          entity: 'INVOICE',
-          details: `Tentativa de acesso negada ao estoque: ${stockId}`,
-          ...(userId && { userId }),
+        await persistAuditBestEffort({
+          repository: this.auditLogRepository,
+          logger: this.applicationLogger,
+          requestId,
+          log: {
+            action: 'UNAUTHORIZED_ACCESS',
+            entity: 'INVOICE',
+            details: `Tentativa de acesso negada ao estoque: ${stockId}`,
+            ...(userId && { userId }),
+          },
         });
 
         throw new AppError('Acesso não autorizado ao estoque informado.', 403);
@@ -109,8 +118,10 @@ export class ReadInvoiceUseCase {
           continue;
         }
 
-        const similarityMatch: ISimilarityMatch | null =
-          await this.aiProvider.findSimilarProduct(item.description, existingStockProducts);
+        const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
+        const similarityMatch: ISimilarityMatch | null = candidates.length > 0
+          ? await this.aiProvider.findSimilarProduct(item.description, candidates)
+          : null;
 
         if (similarityMatch) {
           suggestions.push({
@@ -140,15 +151,21 @@ export class ReadInvoiceUseCase {
         accessKey: extractedData.accessKey,
         stockId,
         operations,
-        auditLog: {
+      }));
+
+      await persistAuditBestEffort({
+        repository: this.auditLogRepository,
+        logger: this.applicationLogger,
+        requestId,
+        log: {
           action: 'CREATE',
           entity: 'INVOICE',
           entityId: extractedData.accessKey,
           details: `Nota Fiscal nº ${extractedData.invoiceNumber} lida. ${operations.length} produtos processados, ${suggestions.length} sugestões pendentes.`,
           ...(userId && { userId }),
-          ...(companyId && { companyId }),
+          companyId: authorizedStock.companyId,
         },
-      }));
+      });
 
       return {
         extractedData,
@@ -156,12 +173,13 @@ export class ReadInvoiceUseCase {
         suggestions,
       };
     } finally {
-      console.log(`[Use Case] Tentando deletar arquivo em: ${filePath}`);
       try {
         await this.storageProvider.deleteFile(filePath);
-        console.log(`[Storage] Arquivo temporário removido: ${filePath}`);
       } catch (error) {
-        console.error(`[Storage] Erro ao deletar arquivo temporário: ${filePath}`, error);
+        this.applicationLogger.warn('Temporary file cleanup failed', {
+          ...(requestId && { requestId }),
+          error: { name: error instanceof Error ? error.name : 'UnknownError' },
+        });
       }
     }
   }

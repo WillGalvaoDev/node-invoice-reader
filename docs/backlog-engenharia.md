@@ -225,6 +225,10 @@ Adicionar timeout explícito e `AbortSignal` às duas chamadas, retry com backof
 
 ### M2-01 · Rate limiting em `/login` e `/users` e `trust proxy`
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `POST /login` protegido por IP com 10 requisições a cada 15 minutos e `POST /users` com 5 requisições por hora, em `MemoryStore` independentes. Testes HTTP confirmam tráfego legítimo, bloqueio `429` previsível com `Retry-After`, não execução dos controllers após o limite, isolamento entre IPs e abertura de nova janela sem sleep real. `TRUST_PROXY_HOPS` é validado entre 0 e 10, tem default seguro 0 e passa a confiar no número exato de proxies configurado; headers encaminhados são ignorados quando a confiança está desabilitada. O limiter de upload permanece em 5/min por usuário e seu handler agora encaminha `AppError` via `next`. Testes específicos: 17/17; suíte completa: 88/88; typecheck, build e `git diff --check` aprovados. Requisito operacional: definir `TRUST_PROXY_HOPS=1` somente quando a API estiver atrás de exatamente um proxy reverso confiável.
+
 **Descrição**
 Aplicar o middleware de rate limit já existente aos endpoints não autenticados, com janela e limite próprios, e configurar `trust proxy` corretamente para que a chave por IP seja confiável. Trocar o `throw` do handler por `next(...)`.
 *Itens de origem: 1.2, 3.4*
@@ -240,6 +244,10 @@ Aplicar o middleware de rate limit já existente aos endpoints não autenticados
 ---
 
 ### M2-02 · Remover log de credencial e adotar logger estruturado
+
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** removidos os 17 usos de `console.*` do código de produção, incluindo o log de login que expunha e-mail e hash Argon2 e os logs textuais de repositório/use cases. Logger interno estruturado em JSON fornece níveis `debug`, `info`, `warn` e `error`, timestamp, mensagem, request ID e contexto, com sink injetável e redaction recursiva centralizada para senha/hash, authorization, cookies, tokens/JWTs, API keys e secrets, sem nova dependência. Middleware gera UUID ou aceita `X-Request-Id` externo somente com formato seguro e até 64 caracteres, devolve o header em respostas normais, erros e `429`, e permite correlação no error handler e no cleanup do upload. Testes comportamentais confirmam ausência de senha/hash/e-mail nos logs de login, silêncio seguro no cadastro e Gemini, resposta sem detalhes internos e redaction aninhada. Testes focados: 42/42; suíte completa: 94/94; typecheck, build e `git diff --check` aprovados. Busca final: zero `console.*` em produção e nenhum call site do logger recebe body, headers, prompt, resposta Gemini ou credencial.
 
 **Descrição**
 Remover o `console.log` que imprime o objeto completo do usuário com hash de senha. Introduzir logger estruturado com níveis, `redact` de campos sensíveis e request ID para correlação, substituindo as ocorrências de `console.*` em código de produção.
@@ -257,6 +265,10 @@ Remover o `console.log` que imprime o objeto completo do usuário com hash de se
 
 ### M2-03 · Validação de entrada com schema declarativo
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `zod` aplicado antes dos controllers em login, cadastro de usuário, criação de empresa e query de produtos, além da validação do body multipart com limpeza do arquivo temporário em falha. Objetos HTTP rejeitam campos desconhecidos e retornam `400` no envelope existente sem refletir o payload; e-mail e nomes são normalizados, IDs externos seguem UUID e nenhuma rota atual possui `params`. Respostas DANFE e similarity agora passam por schemas declarativos: extras são descartados, números não sofrem coerção, chave de acesso exige 44 dígitos, confiança fica entre 0 e 1 e `issuedAt` é convertido de data ISO válida para `Date`. JSON vazio/malformado, timeout, retry e fallback seguro de similarity de M1-08 foram preservados. RED registrou 14 falhas comportamentais; testes focados: 55/55; suíte completa: 111/111; typecheck e build aprovados.
+
 **Descrição**
 Introduzir `zod` e aplicar em duas fronteiras: corpo das requisições HTTP (com normalização) e resposta do Gemini (corrigindo de passagem o tipo `issuedAt`, que hoje é declarado `Date` e nunca é `Date`).
 *Itens de origem: 10.2, 4.3*
@@ -272,6 +284,10 @@ Introduzir `zod` e aplicar em duas fronteiras: corpo das requisições HTTP (com
 ---
 
 ### M2-04 · Corrigir `companyId` vindo do cliente e isolar falhas de auditoria
+
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** o upload de invoice agora aceita somente `stockId` e deriva `companyId` de `authorizedStock.companyId`; o schema estrito rejeita tenant enviado pelo cliente. Em `GET /products`, `companyId` continua aceito como filtro primário isolado, mas a combinação redundante `stockId + companyId` é rejeitada. Audits de sucesso de invoice e company passaram a best-effort pós-operação; o audit de `UNAUTHORIZED_ACCESS` permanece antes do `403`, mas sua falha não concede acesso nem altera o status. Falhas são registradas pelo logger estruturado com request ID, ação, entidade e nome do erro, sem payload ou mensagem interna. A transação da invoice continua contendo somente `ProcessedInvoice` e todos os upserts, preservando atomicidade e idempotência. RED: 6 falhas em 39 testes; testes focados: 59/59; suíte completa: 117/117; PostgreSQL efêmero: 7/7, incluindo commit principal apesar de audit failure e retry `409` sem novo incremento; typecheck e build aprovados.
 
 **Descrição**
 Derivar o `companyId` do audit log do estoque real em vez de aceitá-lo do corpo da requisição, e isolar a escrita de auditoria para que sua falha não derrube uma operação já persistida.
@@ -289,6 +305,10 @@ Derivar o `companyId` do audit log do estoque real em vez de aceitá-lo do corpo
 
 ### M2-05 · Limitar candidatos enviados ao modelo
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** prefilter determinístico em memória aplicado entre o catálogo stock-scoped e `findSimilarProduct`, com teto centralizado de 15 candidatos conforme a recomendação de origem. A normalização usa lowercase, remoção de acentos, pontuação e whitespace consistente, preservando números e medidas; o ranking combina tokens exatos, prefixos e igualdade textual, com desempate estável por descrição normalizada, código e ID. Catálogos stock-scoped de até 15 itens continuam completos; acima disso, somente candidatos com sinal lexical são enviados e a ausência de sinal dispensa a chamada ao Gemini, sem fallback ilimitado. O prompt recebe apenas `id`, `code` e `description`, em JSON compacto. RED demonstrou 30/30 candidatos enviados e chamada com 20 itens irrelevantes; testes focados: 79/79; suíte completa: 125/125; typecheck e build aprovados.
+
 **Descrição**
 Pré-filtrar os produtos do estoque antes da chamada de similaridade — por código, por trigrama (`pg_trgm`) ou por recorte equivalente — enviando um conjunto reduzido de candidatos em vez do estoque inteiro.
 *Itens de origem: 4.2 (parcial)*
@@ -304,6 +324,10 @@ Pré-filtrar os produtos do estoque antes da chamada de similaridade — por có
 ---
 
 ### M2-06 · Endurecer defesas contra prompt injection
+
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** prompts de extração e similarity agora usam `systemInstruction` da versão instalada do SDK para regras confiáveis, enquanto documento, item e candidatos seguem em partes `user` delimitadas como dados não confiáveis. O output estruturado nativo foi preservado e continua validado por Zod; similarity reconcilia explicitamente o ID retornado com o conjunto enviado, degradando ID inventado para `null`. Dados do catálogo permanecem minimizados a `id`, `code` e `description`, com prefilter limitado a 15. RED: 2 falhas esperadas por ausência de `systemInstruction`; testes focados: 52/52; suíte completa: 128/128; typecheck, build e `git diff --check` aprovados.
 
 **Descrição**
 Reforçar a sanitização (hoje remove marcação HTML mas preserva texto imperativo) e delimitar explicitamente o conteúdo não confiável no prompt de similaridade.
@@ -321,6 +345,10 @@ Reforçar a sanitização (hoje remove marcação HTML mas preserva texto impera
 
 ### M2-07 · CORS restrito e cabeçalhos de segurança
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `CORS_ALLOWED_ORIGINS` é parseada centralmente como allowlist de origins HTTP(S), com trim, remoção de vazios/duplicatas, default vazio e rejeição de wildcard, credenciais, paths e valores inválidos. CORS permite somente `GET`, `POST` e `OPTIONS`, aceita `Content-Type`, `Authorization` e `X-Request-Id`, expõe `X-Request-Id` e `Retry-After` e mantém credentials desabilitado; clientes sem `Origin` continuam aceitos. Helmet 8 foi inserido no pipeline com defaults seguros e CSP desabilitada deliberadamente porque a aplicação é uma API JSON sem HTML. RED: 8 falhas e uma suíte sem coleta pela ausência do middleware; testes focados HTTP/configuração: 42/42; suíte completa: 140/140; typecheck, build e `git diff --check` aprovados.
+
 **Descrição**
 Restringir a origem do CORS às origens conhecidas e adicionar `helmet`.
 *Itens de origem: 1.8*
@@ -332,6 +360,10 @@ Restringir a origem do CORS às origens conhecidas e adicionar `helmet`.
 | **Risco** | **Médio se a origem não estiver definida** — restringir errado quebra o cliente |
 | **Prioridade** | **P2** |
 | **Impacto** | Defesa em profundidade. Não é vulnerabilidade explorável no modelo atual (Bearer em header, sem cookies) — por isso não está em M1. |
+
+---
+
+**Saída do Milestone 2:** validada. Rate limits e identificação segura de IP, logging com redaction/request ID, validação declarativa das fronteiras, tenancy derivada, auditoria best-effort, minimização/hardening do Gemini e política HTTP restritiva foram concluídos. **Milestone 2 concluído em 2026-08-13.**
 
 ---
 

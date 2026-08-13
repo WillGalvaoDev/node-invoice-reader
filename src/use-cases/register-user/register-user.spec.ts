@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { RegisterUserUseCase } from './register-user.use-case.js';
 import type { IUserRepository, IUser } from '../../repositories/user.repository.js';
 import type { IHashProvider } from '../../providers/hash.provider.js';
@@ -54,6 +54,12 @@ describe('Register User Use Case', () => {
   });
 
   it('should be able to register a new user with a hashed password', async () => {
+    const consoleMethods = [
+      vi.spyOn(console, 'log').mockImplementation(() => undefined),
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'info').mockImplementation(() => undefined),
+    ];
     const user = await sut.execute({
       name: 'John Doe',
       email: 'johndoe@example.com',
@@ -66,6 +72,8 @@ describe('Register User Use Case', () => {
     // Validando no banco em memória se a senha foi salva CRIPTOGRAFADA
     const savedUser = userRepository.items[0];
     expect(savedUser?.password).toBe('password123-hashed');
+    expect(consoleMethods.every((method) => method.mock.calls.length === 0)).toBe(true);
+    for (const method of consoleMethods) method.mockRestore();
   });
 
   it('should not be able to register a user with an existing email', async () => {

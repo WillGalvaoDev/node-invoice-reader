@@ -41,6 +41,8 @@ describe('configuração da aplicação', () => {
       PORT: 4000,
       GEMINI_TIMEOUT_MS: 30_000,
       GEMINI_MAX_ATTEMPTS: 2,
+      TRUST_PROXY_HOPS: 0,
+      CORS_ALLOWED_ORIGINS: [],
     });
   });
 
@@ -77,5 +79,52 @@ describe('configuração da aplicação', () => {
     expect(() => createEnv({ ...required, GEMINI_TIMEOUT_MS: '30001' })).toThrow('GEMINI_TIMEOUT_MS');
     expect(() => createEnv({ ...required, GEMINI_MAX_ATTEMPTS: '0' })).toThrow('GEMINI_MAX_ATTEMPTS');
     expect(() => createEnv({ ...required, GEMINI_MAX_ATTEMPTS: '3' })).toThrow('GEMINI_MAX_ATTEMPTS');
+  });
+
+  it('não confia em proxy por padrão e valida a quantidade de hops confiáveis', async () => {
+    const { createEnv } = await import('./env.js');
+    const required = {
+      DATABASE_URL: 'postgresql://localhost/docscan',
+      JWT_SECRET: 'jwt-secret',
+      GEMINI_API_KEY: 'gemini-key',
+    };
+
+    expect(createEnv(required).TRUST_PROXY_HOPS).toBe(0);
+    expect(createEnv({ ...required, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
+    expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '-1' })).toThrow('TRUST_PROXY_HOPS');
+    expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '11' })).toThrow('TRUST_PROXY_HOPS');
+  });
+
+  it('normaliza uma allowlist CORS e usa lista vazia como default seguro', async () => {
+    const { createEnv } = await import('./env.js');
+    const required = {
+      DATABASE_URL: 'postgresql://localhost/docscan',
+      JWT_SECRET: 'jwt-secret',
+      GEMINI_API_KEY: 'gemini-key',
+    };
+
+    expect(createEnv(required).CORS_ALLOWED_ORIGINS).toEqual([]);
+    expect(createEnv({
+      ...required,
+      CORS_ALLOWED_ORIGINS: ' https://app.example.com, ,http://localhost:5173 ',
+    }).CORS_ALLOWED_ORIGINS).toEqual(['https://app.example.com', 'http://localhost:5173']);
+  });
+
+  it.each([
+    '*',
+    'https://app.example.com,*',
+    'not-an-origin',
+    'ftp://app.example.com',
+    'https://user:password@app.example.com',
+    'https://app.example.com/path',
+  ])('rejeita origin CORS insegura ou inválida: %s', async (value) => {
+    const { createEnv } = await import('./env.js');
+
+    expect(() => createEnv({
+      DATABASE_URL: 'postgresql://localhost/docscan',
+      JWT_SECRET: 'jwt-secret',
+      GEMINI_API_KEY: 'gemini-key',
+      CORS_ALLOWED_ORIGINS: value,
+    })).toThrow('CORS_ALLOWED_ORIGINS');
   });
 });

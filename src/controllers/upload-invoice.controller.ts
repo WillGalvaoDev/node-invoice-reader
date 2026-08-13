@@ -4,6 +4,7 @@ import { ReadInvoiceUseCase } from '../use-cases/read-invoice/read-invoice.use-c
 import { AppError } from '../errors/app-error.js';
 import type { IStorageProvider } from '../providers/storage.provider.js';
 import { isDanfeMimeType } from '../config/upload.js';
+import { uploadInvoiceBodySchema } from '../schemas/http.schemas.js';
 
 export class UploadInvoiceController {
   constructor(
@@ -17,13 +18,13 @@ export class UploadInvoiceController {
       throw new AppError('Arquivo da nota fiscal é obrigatório.', 400);
     }
 
-    // 2. Valida se o ID do estoque veio no body da requisição
-    const { stockId, companyId } = request.body;
-
-    if (!stockId) {
+    // O multipart já criou o temporário; valide antes do caso de uso e limpe em falha.
+    const body = uploadInvoiceBodySchema.safeParse(request.body);
+    if (!body.success) {
       await this.storageProvider.deleteFile(request.file.path);
-      throw new AppError('ID do estoque (stockId) é obrigatório.', 400);
+      throw new AppError('Dados inválidos.', 400);
     }
+    const { stockId } = body.data;
 
     const filePath = request.file.path;
     const mimeType = request.file.mimetype;
@@ -40,7 +41,7 @@ export class UploadInvoiceController {
       mimeType,
       stockId,
       userId,
-      companyId,
+      requestId: request.requestId,
     });
 
     // 4. Retorna no padrão limpo e consistente da API
