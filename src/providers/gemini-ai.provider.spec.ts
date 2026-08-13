@@ -16,7 +16,7 @@ const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
 describe('GeminiAiProvider file MIME', () => {
   const validDanfe = {
     accessKey: '1'.repeat(44), invoiceNumber: '1', series: '1', issuedAt: '2026-01-01', totalValue: 10,
-    supplier: { cnpj: '1', name: 'Supplier' },
+    supplier: { cnpj: '11222333000181', name: 'Supplier' },
     products: [{ code: 'A', description: 'A', quantity: 1, unitPrice: 10, totalPrice: 10, unitMeasurement: 'UN' }],
   };
 
@@ -170,6 +170,20 @@ describe('GeminiAiProvider file MIME', () => {
     expect(result.issuedAt).toBeInstanceOf(Date);
     expect(result).not.toHaveProperty('extraRoot');
     expect(result.products[0]).not.toHaveProperty('extraItem');
+  });
+
+  it('canonicaliza CNPJ alfanumérico extraído e rejeita DV inválido', async () => {
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify({
+      ...validDanfe, supplier: { ...validDanfe.supplier, cnpj: '12.abc.345/01de-35' },
+    }) });
+    await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+      .resolves.toMatchObject({ supplier: { cnpj: '12ABC34501DE35' } });
+
+    generateContent.mockResolvedValueOnce({ text: JSON.stringify({
+      ...validDanfe, supplier: { ...validDanfe.supplier, cnpj: '12.ABC.345/01DE-34' },
+    }) });
+    await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+      .rejects.toMatchObject({ statusCode: 422 });
   });
 
   it.each([

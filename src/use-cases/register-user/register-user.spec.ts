@@ -91,6 +91,6 @@ describe('Register User Use Case', () => {
         email: 'duplicate@example.com',
         password: 'password123'
       })
-    ).rejects.toBeInstanceOf(Error);
+    ).rejects.toMatchObject({ name: 'AppError', statusCode: 409 });
   });
 });

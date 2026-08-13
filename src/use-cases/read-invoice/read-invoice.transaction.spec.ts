@@ -13,7 +13,7 @@ describe('ReadInvoiceUseCase transaction phases', () => {
   const persistence = { persist: vi.fn() };
   const invoice = {
     accessKey: '1'.repeat(44), invoiceNumber: '1', series: '1', issuedAt: new Date(), totalValue: 2,
-    supplier: { cnpj: '1', name: 'Supplier' },
+    supplier: { cnpj: '11222333000181', name: 'Supplier' },
     products: [
       { code: 'A', description: 'A', quantity: 1, unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1 },
       { code: 'B', description: 'B', quantity: 1, unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1 },
@@ -59,7 +59,10 @@ describe('ReadInvoiceUseCase transaction phases', () => {
     }));
     expect(products.save).not.toHaveBeenCalled();
     expect(products.update).not.toHaveBeenCalled();
-    expect(audit.create).toHaveBeenCalledOnce();
+    expect(audit.create).toHaveBeenCalledTimes(3);
+    expect(audit.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'CREATE', entity: 'PRODUCT', stockId: 'stock-1', previousState: null,
+    }));
   });
 
   it('propaga falha transacional sem realizar escrita por outro caminho', async () => {

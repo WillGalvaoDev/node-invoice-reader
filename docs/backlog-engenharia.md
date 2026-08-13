@@ -377,6 +377,10 @@ Restringir a origem do CORS às origens conhecidas e adicionar `helmet`.
 
 ### M3-01 · Migrar custeio para média ponderada
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** o upsert de produto passou a usar `INSERT ... ON CONFLICT DO UPDATE` parametrizado dentro da mesma transação de `ProcessedInvoice`, calculando no PostgreSQL `(quantidade atual × custo atual + quantidade recebida × custo recebido) / quantidade final`. `quantity` permanece `Decimal(12,4)`; `unitPrice` e `totalPrice`, `Decimal(12,2)`, são arredondados pelo PostgreSQL para duas casas e o total é derivado do saldo final. O gate real provou os casos 10×5 + 10×15 = 20×10 e 10×5 + 5×20 = 15×10, saldo zero com decimais, concorrência sobre produto existente (30, custo 11,67), criação concorrente (um produto, quantidade 15, custo 13,33), idempotência de custo, rollback e audit best-effort. RED PostgreSQL: 3 falhas por último custo; gate PostgreSQL executado duas vezes do zero: 12/12 em ambas; testes focados: 33/33; suíte completa: 140/140; typecheck, build e `git diff --check` aprovados. Nenhuma migration foi necessária.
+
 **Descrição**
 Substituir a aritmética atual do upsert pelo cálculo de média ponderada: novo custo unitário = (saldo × custo atual + quantidade recebida × custo recebido) ÷ quantidade total, com `totalPrice` derivado e consistente. Ajustar o teste que fixa o comportamento atual e migrar os dados existentes.
 *Itens de origem: 6.1*
@@ -392,6 +396,10 @@ Substituir a aritmética atual do upsert pelo cálculo de média ponderada: novo
 ---
 
 ### M3-02 · Persistir sugestões e fechar o ciclo de confirmação/rejeição
+
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `ProductSimilaritySuggestion` persiste `ProcessedInvoice`, `itemIndex`, estoque/produto sugerido, snapshot de código/descrição/quantidade/custo/unidade, confidence, reason e decisão humana em lifecycle fechado `PENDING → CONFIRMED|REJECTED`. Exact-code continua automático; similarity cria pending dentro da transação da invoice sem alterar estoque; no-match continua criando produto. Endpoints autenticados listam pending por estoque e recebem apenas suggestion ID com body vazio para confirmar/rejeitar. Confirmação aplica a primitive ponderada de M3-01; rejeição preserva o candidato e cadastra o snapshot como produto novo. Transição condicional `WHERE status = PENDING` e estoque/status na mesma transação impedem decisão/aplicação dupla. RED: casos de uso inexistentes; testes focados: 59/59; suíte completa: 150/150; PostgreSQL efêmero com 8 migrations: 20/20 em duas execuções finais, cobrindo pending, rollback, retry, owner/collaborator/outsider, weighted average, reject/new-product e corridas confirm/confirm e confirm/reject. Typecheck, build e `git diff --check` aprovados.
 
 **Descrição**
 Implementar o fluxo especificado: match determinístico por código continua atualizando automaticamente; match identificado pela IA passa a gerar **sugestão pendente persistida**, sem alterar estoque. Criar a entidade de sugestão (item da nota, produto candidato, confiança, estado, nota de origem), os endpoints de listagem, confirmação e rejeição, e a aplicação da entrada apenas após confirmação — com cadastro como novo produto no caso de rejeição.
@@ -409,8 +417,12 @@ Implementar o fluxo especificado: match determinístico por código continua atu
 
 ### M3-03 · Normalização e validação de CNPJ
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** primitive determinística única normaliza a apresentação oficial para 14 posições canônicas, preserva letras em uppercase e valida os dois DVs pelo módulo 11 oficial (valor ASCII menos 48). O fluxo aceita simultaneamente CNPJ numérico legado e alfanumérico 2026; HTTP, `CreateCompanyUseCase`, schema Gemini e `ReadInvoiceUseCase` usam a mesma regra, rejeitando DV/símbolos inválidos antes de consulta ou persistência. Os vetores independentes incluem `11.222.333/0001-81`, `04.252.011/0001-10` e o exemplo oficial `12.ABC.345/01DE-35`. RED: módulo ausente, máscara persistida, casing duplicável e DV inválido aceito; testes focados: 40/40 no primeiro GREEN e 96 casos de boundaries/regressão antes do ajuste final; suíte completa: 177/177; PostgreSQL Gate efêmero com 8 migrations: 20/20; typecheck, build e `git diff --check` aprovados. O campo `TEXT UNIQUE` já comporta a representação canônica numérica/alfanumérica, portanto nenhuma migration foi necessária.
+
 **Descrição**
-Normalizar para 14 dígitos na entrada, validar dígitos verificadores e migrar os registros existentes antes que a base cresça.
+Normalizar para 14 posições canônicas na entrada, suportando CNPJ numérico legado e CNPJ alfanumérico, validar dígitos verificadores e migrar registros existentes quando necessário antes que a base cresça.
 *Itens de origem: 2.2*
 
 | | |
@@ -424,6 +436,10 @@ Normalizar para 14 dígitos na entrada, validar dígitos verificadores e migrar 
 ---
 
 ### M3-04 · Auditoria completa: `stockId`, descrição e estados
+
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `IAuditLog`, repository Prisma e dublê agora preservam `stockId`, `description`, `previousState` e `newState`, usando as colunas já existentes. Company criada referencia company/owner/estoque sem persistir CNPJ; invoice bem-sucedida registra escopo e contagens; cada entrada determinística gera evento `PRODUCT CREATE|UPDATE` pós-commit com somente `{ quantity, unitPrice, totalPrice }` antes/depois; tentativa negada registra stock/company apenas quando derivados do estoque persistido. Audit permanece best-effort fora de `$transaction`, com falha segura correlacionada pelo request ID no logger. RED: 7 falhas por campos descartados/ausentes; testes focados: 25/25; suíte completa: 178/178; PostgreSQL efêmero com 8 migrations: 21/21, incluindo estados JSONB reais, tenant/actor/target e commit/idempotência apesar de falha do audit. Typecheck aprovado; nenhuma migration necessária.
 
 **Descrição**
 Estender a interface do repositório de auditoria para gravar `stockId`, `description`, `previousState` e `newState` — colunas que já existem no schema e na migration e nunca são escritas.
@@ -441,6 +457,10 @@ Estender a interface do repositório de auditoria para gravar `stockId`, `descri
 
 ### M3-05 · Alinhar propriedade do produto ao estoque e paginar a listagem
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `GET /products` agora exige `stockId`, autoriza owner ou collaborator com `StockPermission.canView` antes da query e lista exclusivamente pelo estoque, preservando `Product.userId` apenas como provenance inclusive quando `SetNull`. A paginação por cursor usa default 50, máximo 200, `createdAt DESC, id DESC`, `take limit + 1` e resposta `{ items, nextCursor }`; cursor inexistente ou de outro estoque retorna 400 sem expor dados. O teste que exigia esconder produto de outro criador foi reescrito para provar a visibilidade compartilhada. RED: 8 falhas esperadas; testes focados: 22/22; suíte completa: 182/182; PostgreSQL efêmero com 8 migrations: 22/22 em duas execuções, cobrindo múltiplos criadores, creator removido, owner/collaborator/outsider, páginas sem duplicação/perda e cursor cross-stock. Typecheck, build e `git diff --check` aprovados. Nenhuma migration ou índice novo foi necessário.
+
 **Descrição**
 Trocar o filtro por criador na leitura por autorização de acesso ao estoque, e introduzir paginação por cursor no mesmo movimento. Reescrever o teste que codifica o comportamento atual.
 *Itens de origem: 7.2, 8.2*
@@ -456,6 +476,10 @@ Trocar o filtro por criador na leitura por autorização de acesso ao estoque, e
 ---
 
 ### M3-06 · Validação de coerência do DANFE
+
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** uma função pura baseada em `Prisma.Decimal` valida cada linha por `quantity × unitPrice ≈ totalPrice`, com tolerância `max(R$ 0,02, 1%)`, e rejeita quando a soma dos `totalPrice` excede `totalValue` em mais de R$ 0,02. A comparação global permanece assimétrica conforme o finding 4.4, permitindo total maior por frete, seguro e IPI. A validação ocorre após schema/CNPJ/positividade e antes de catálogo, exact match, similarity ou persistência; inconsistência retorna 422 genérico, sem consumir idempotência ou gerar audit de sucesso. RED: helper ausente e invoice incoerente preparada para persistência; testes focados: 85/85; suíte completa: 199/199; PostgreSQL efêmero com 8 migrations: 23/23 em duas execuções finais, provando ausência de `ProcessedInvoice`, alteração de estoque, produto, suggestion e audit na falha, seguida de retry coerente bem-sucedido. Typecheck, build e `git diff --check` aprovados. Nenhuma migration ou dependência foi necessária.
 
 **Descrição**
 Verificar, após a extração, se a soma dos itens é compatível com o total declarado da nota, rejeitando ou sinalizando divergências acima da tolerância.
@@ -473,6 +497,10 @@ Verificar, após a extração, se a soma dos itens é compatível com o total de
 
 ### M3-07 · Não sobrescrever `description` no upsert
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** a primitive SQL ponderada continua usando a description recebida no `INSERT`, mas não a inclui mais no `DO UPDATE` do conflito `(stockId, code)`. Assim, exact-code e confirmação de similarity preservam a descrição curada do produto existente; no-match e rejeição continuam criando produto com a descrição recebida/snapshot. Quantity, custo médio e total permanecem no mesmo upsert atômico. RED: o teste estrutural encontrou `"description" = EXCLUDED."description"`; testes focados: 64/64; suíte completa: 200/200; PostgreSQL efêmero com 8 migrations: 24/24 em duas execuções, cobrindo entradas sequenciais, confirm/reject, concorrência sobre existente e corrida de criação. Typecheck, build, Prisma validate e `git diff --check` aprovados. Nenhuma migration ou dependência foi necessária.
+
 **Descrição**
 Preservar a descrição cadastrada ao atualizar saldo por código, em vez de substituí-la pelo texto extraído da nota mais recente.
 *Itens de origem: 6.2*
@@ -489,6 +517,10 @@ Preservar a descrição cadastrada ao atualizar saldo por código, em vez de sub
 
 ### M3-08 · `findUnique` na chave composta e tradução de erros do Prisma
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** `findByCode` passou a usar `findUnique` com `stockId_code`; o upsert ponderado já permanecia corretamente baseado em `ON CONFLICT (stockId, code)`. Um reconhecedor mínimo centraliza somente os códigos `P2002`/`P2003`, enquanto Product, Company, User e Stock traduzem cada constraint com contexto de domínio: conflitos de unicidade e exclusão referenciada retornam `409`, e referências inválidas em criação/alteração retornam `400`, sem expor metadata Prisma. A duplicidade de `ProcessedInvoice` preserva o `409` e o rollback transacional de M1-06. RED: 9 falhas nos lookups/traduções ausentes; testes focados: 23/23; suíte completa: 209/209; PostgreSQL efêmero com 8 migrations: 25/25 em duas execuções, comprovando códigos iguais em stocks distintos, lookup correto, corrida P2002 com uma única linha, P2003 real com integridade preservada e regressão da idempotência. Typecheck, build, Prisma validate e `git diff --check` aprovados. Nenhuma migration ou dependência foi necessária.
+
 **Descrição**
 Usar a chave composta no lookup por código e mapear `P2002`/`P2003` para `AppError` com status adequado.
 *Itens de origem: 2.3*
@@ -500,6 +532,10 @@ Usar a chave composta no lookup por código e mapear `P2002`/`P2003` para `AppEr
 | **Risco** | **Baixo** |
 | **Prioridade** | **P2** |
 | **Impacto** | Parcialmente absorvido por M1-05, que já passa a usar a chave composta no upsert. O que resta é a tradução de erro — hoje violação de constraint vira `500` genérico. |
+
+---
+
+**Saída do Milestone 3:** validada. Custo médio ponderado concorrente, ciclo humano de similarity, CNPJ numérico/alfanumérico, auditoria de domínio, ownership/paginação, coerência do DANFE, preservação de description e tradução de constraints Prisma foram concluídos. **Milestone 3 concluído em 2026-08-13.**
 
 ---
 

@@ -29,3 +29,14 @@ export function validateQuery(schema: ZodType) {
     }
   };
 }
+
+export function validateParams(schema: ZodType) {
+  return (request: Request, _response: Response, next: NextFunction): void => {
+    try {
+      request.params = validate(schema, request.params) as Record<string, string>;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}

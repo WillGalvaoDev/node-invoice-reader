@@ -1,18 +1,23 @@
-import type { AuditAction } from '@prisma/client';
+import type { AuditAction, Prisma } from '@prisma/client';
 import type { IAuditLogRepository, IAuditLog } from './audit-log.repository.js';
 import { prisma } from '../infra/prisma.js';
 
 export class PrismaAuditLogRepository implements IAuditLogRepository {
   async create(log: IAuditLog): Promise<IAuditLog> {
+    const data: Prisma.AuditLogUncheckedCreateInput = {
+      action: log.action as AuditAction,
+      entity: log.entity,
+      ...(log.entityId && { entityId: log.entityId }),
+      ...(log.details && { details: log.details }),
+      ...(log.userId && { userId: log.userId }),
+      ...(log.companyId && { companyId: log.companyId }),
+      ...(log.stockId && { stockId: log.stockId }),
+      ...(log.description && { description: log.description }),
+      ...(log.previousState && { previousState: log.previousState }),
+      ...(log.newState && { newState: log.newState }),
+    };
     const createdLog = await prisma.auditLog.create({
-      data: {
-        action: log.action as AuditAction,
-        entity: log.entity,
-        ...(log.entityId && { entityId: log.entityId }),
-        ...(log.details && { details: log.details }),
-        ...(log.userId && { userId: log.userId }),
-        ...(log.companyId && { companyId: log.companyId }),
-      },
+      data,
     });
 
     return createdLog as IAuditLog;

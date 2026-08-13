@@ -1,15 +1,25 @@
 import type { IUserRepository, IUser } from './user.repository.js';
 import { prisma } from '../infra/prisma.js';
+import { AppError } from '../errors/app-error.js';
+import { isPrismaErrorCode } from '../errors/prisma-error.js';
 
 export class PrismaUserRepository implements IUserRepository {
   async create(user: Omit<IUser, 'id' | 'createdAt'> & { password: string }): Promise<IUser> {
-    const createdUser = await prisma.user.create({
-      data: {
-        email: user.email,
-        name: user.name,
-        password: user.password,
-      },
-    });
+    let createdUser;
+    try {
+      createdUser = await prisma.user.create({
+        data: {
+          email: user.email,
+          name: user.name,
+          password: user.password,
+        },
+      });
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) {
+        throw new AppError('Já existe um usuário cadastrado com este email.', 409);
+      }
+      throw error;
+    }
 
     return {
       id: createdUser.id,

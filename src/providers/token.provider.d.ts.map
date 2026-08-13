@@ -1,0 +1,1 @@
+{"version":3,"file":"token.provider.d.ts","sourceRoot":"","sources":["token.provider.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,aAAa;IAC5B,GAAG,EAAE,MAAM,CAAC;IACZ,KAAK,EAAE,MAAM,CAAC;CACf;AAED,MAAM,WAAW,cAAc;IAC7B,aAAa,CAAC,OAAO,EAAE,aAAa,GAAG,OAAO,CAAC,MAAM,CAAC,CAAC;IACvD,WAAW,CAAC,KAAK,EAAE,MAAM,GAAG,OAAO,CAAC,aAAa,GAAG,IAAI,CAAC,CAAC;CAC3D"}

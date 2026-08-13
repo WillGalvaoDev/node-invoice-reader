@@ -9,6 +9,10 @@ import type { DanfeMimeType } from '../../config/upload.js';
 import { logger, type Logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
 import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.js';
+import { randomUUID } from 'node:crypto';
+import type { IInvoiceSuggestionOperation } from '../../repositories/invoice-persistence.repository.js';
+import { parseCnpj } from '../../domain/cnpj.js';
+import { assertDanfeCoherence } from '../../domain/danfe-coherence.js';
 
 interface IReadInvoiceRequest {
   filePath: string;
@@ -19,6 +23,8 @@ interface IReadInvoiceRequest {
 }
 
 export interface IProductSuggestion {
+  id: string;
+  status: 'PENDING';
   invoiceItem: IDanfeExtractResult['products'][number];
   suggestedProduct: IProduct;
   confidence: number;
@@ -50,6 +56,14 @@ export class ReadInvoiceUseCase {
       .trim();
   }
 
+  private productAuditState(product: IProduct) {
+    return {
+      quantity: product.quantity,
+      unitPrice: product.unitPrice,
+      totalPrice: product.totalPrice,
+    };
+  }
+
   async execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
       const authorizedStock = userId
@@ -57,6 +71,7 @@ export class ReadInvoiceUseCase {
         : null;
 
       if (!authorizedStock) {
+        const requestedStock = await this.stockRepository.findById(stockId);
         await persistAuditBestEffort({
           repository: this.auditLogRepository,
           logger: this.applicationLogger,
@@ -64,8 +79,9 @@ export class ReadInvoiceUseCase {
           log: {
             action: 'UNAUTHORIZED_ACCESS',
             entity: 'INVOICE',
-            details: `Tentativa de acesso negada ao estoque: ${stockId}`,
+            description: 'Tentativa de acesso não autorizado ao estoque.',
             ...(userId && { userId }),
+            ...(requestedStock && { stockId: requestedStock.id, companyId: requestedStock.companyId }),
           },
         });
 
@@ -73,7 +89,18 @@ export class ReadInvoiceUseCase {
       }
 
       // 1. Extrai os dados da nota fiscal via Gemini OCR
-      const extractedData = await this.aiProvider.extractDanfeData(filePath, mimeType);
+      const rawExtractedData = await this.aiProvider.extractDanfeData(filePath, mimeType);
+
+      let supplierCnpj: string;
+      try {
+        supplierCnpj = parseCnpj(rawExtractedData.supplier.cnpj);
+      } catch {
+        throw new AppError('O DANFE contém um CNPJ inválido.', 422);
+      }
+      const extractedData = {
+        ...rawExtractedData,
+        supplier: { ...rawExtractedData.supplier, cnpj: supplierCnpj },
+      };
 
       if (!extractedData || !extractedData.products || extractedData.products.length === 0) {
         throw new AppError('Falha ao extrair produtos do DANFE. Nenhum item válido encontrado.', 400);
@@ -91,21 +118,31 @@ export class ReadInvoiceUseCase {
         throw new AppError('Os produtos do DANFE contêm valores ou quantidades inválidas.', 400);
       }
 
+      assertDanfeCoherence(extractedData);
+
       const processedProducts: IProduct[] = [];
       const suggestions: IProductSuggestion[] = [];
       const operations: IInvoiceProductOperation[] = [];
+      const suggestionOperations: IInvoiceSuggestionOperation[] = [];
 
       const existingStockProducts = await this.productRepository.findByStockId(stockId);
+      const auditStateByProductCode = new Map(
+        existingStockProducts.map((product) => [product.code, product] as const),
+      );
 
-      for (const rawItem of extractedData.products) {
+      for (const [itemIndex, rawItem] of extractedData.products.entries()) {
         const item = {
           ...rawItem,
           description: this.sanitizeString(rawItem.description),
         };
 
-        const existingByCode = await this.productRepository.findByCode(item.code, stockId);
+        const existingByCode = existingStockProducts.find((product) => product.code === item.code)
+          ?? await this.productRepository.findByCode(item.code, stockId);
 
         if (existingByCode) {
+          if (!auditStateByProductCode.has(item.code)) {
+            auditStateByProductCode.set(item.code, existingByCode);
+          }
           operations.push({
             product: {
               ...existingByCode,
@@ -123,34 +160,54 @@ export class ReadInvoiceUseCase {
           ? await this.aiProvider.findSimilarProduct(item.description, candidates)
           : null;
 
-        if (similarityMatch) {
+        if (similarityMatch?.product.id) {
+          const suggestionId = randomUUID();
           suggestions.push({
+            id: suggestionId,
+            status: 'PENDING',
             invoiceItem: item,
             suggestedProduct: similarityMatch.product,
+            confidence: similarityMatch.confidence,
+            reason: similarityMatch.reason,
+          });
+          suggestionOperations.push({
+            id: suggestionId,
+            itemIndex,
+            suggestedProductId: similarityMatch.product.id,
+            receivedCode: item.code,
+            receivedDescription: item.description,
+            receivedQuantity: Number(item.quantity),
+            receivedUnitPrice: Number(item.unitPrice),
+            unitMeasurement: item.unitMeasurement,
             confidence: similarityMatch.confidence,
             reason: similarityMatch.reason,
           });
           continue;
         }
 
+        const newProductId = randomUUID();
+        const newProduct: IProduct = {
+          id: newProductId,
+          code: item.code,
+          description: item.description,
+          quantity: Number(item.quantity),
+          unitMeasurement: item.unitMeasurement,
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.totalPrice),
+          stockId,
+          userId: userId ?? null,
+        };
         operations.push({
-          product: {
-            code: item.code,
-            description: item.description,
-            quantity: Number(item.quantity),
-            unitMeasurement: item.unitMeasurement,
-            unitPrice: Number(item.unitPrice),
-            totalPrice: Number(item.totalPrice),
-            stockId,
-            userId: userId ?? null,
-          },
+          product: newProduct,
         });
+        existingStockProducts.push(newProduct);
       }
 
       processedProducts.push(...await this.invoicePersistenceRepository.persist({
         accessKey: extractedData.accessKey,
         stockId,
         operations,
+        suggestions: suggestionOperations,
       }));
 
       await persistAuditBestEffort({
@@ -161,11 +218,42 @@ export class ReadInvoiceUseCase {
           action: 'CREATE',
           entity: 'INVOICE',
           entityId: extractedData.accessKey,
-          details: `Nota Fiscal nº ${extractedData.invoiceNumber} lida. ${operations.length} produtos processados, ${suggestions.length} sugestões pendentes.`,
+          description: 'Invoice processada com sucesso.',
           ...(userId && { userId }),
           companyId: authorizedStock.companyId,
+          stockId,
+          previousState: null,
+          newState: {
+            processedProductCount: operations.length,
+            pendingSuggestionCount: suggestions.length,
+          },
         },
       });
+
+      for (const [index, operation] of operations.entries()) {
+        const persistedProduct = processedProducts[index];
+        if (!persistedProduct?.id) continue;
+        const previousProduct = auditStateByProductCode.get(operation.product.code);
+
+        await persistAuditBestEffort({
+          repository: this.auditLogRepository,
+          logger: this.applicationLogger,
+          requestId,
+          log: {
+            action: previousProduct ? 'UPDATE' : 'CREATE',
+            entity: 'PRODUCT',
+            entityId: persistedProduct.id,
+            description: 'Entrada de estoque processada por invoice.',
+            ...(userId && { userId }),
+            companyId: authorizedStock.companyId,
+            stockId,
+            previousState: previousProduct ? this.productAuditState(previousProduct) : null,
+            newState: this.productAuditState(persistedProduct),
+          },
+        });
+
+        auditStateByProductCode.set(operation.product.code, persistedProduct);
+      }
 
       return {
         extractedData,

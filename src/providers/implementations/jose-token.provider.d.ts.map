@@ -1,0 +1,1 @@
+{"version":3,"file":"jose-token.provider.d.ts","sourceRoot":"","sources":["jose-token.provider.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,cAAc,EAAE,aAAa,EAAE,MAAM,sBAAsB,CAAC;AAG1E,qBAAa,iBAAkB,YAAW,cAAc;IACtD,OAAO,CAAC,MAAM,CAAa;;IAOrB,aAAa,CAAC,OAAO,EAAE,aAAa,GAAG,OAAO,CAAC,MAAM,CAAC;IAStD,WAAW,CAAC,KAAK,EAAE,MAAM,GAAG,OAAO,CAAC,aAAa,GAAG,IAAI,CAAC;CAgBhE"}

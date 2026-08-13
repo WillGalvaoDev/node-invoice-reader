@@ -31,13 +31,25 @@ import { PrismaStockRepository } from './repositories/prisma-stock.repository.js
 import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoice-persistence.repository.js';
 import { invoiceUpload } from './middlewares/invoice-upload.js';
 import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
-import { validateBody, validateQuery } from './middlewares/validate-request.js';
+import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
 import {
   createCompanyBodySchema,
   listProductsQuerySchema,
   loginBodySchema,
   registerUserBodySchema,
+  stockSuggestionParamsSchema,
+  suggestionDecisionParamsSchema,
+  emptyCommandBodySchema,
 } from './schemas/http.schemas.js';
+import { PrismaProductSuggestionRepository } from './repositories/prisma-product-suggestion.repository.js';
+import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
+import { RejectProductSuggestionUseCase } from './use-cases/product-suggestions/reject-product-suggestion.use-case.js';
+import { ListPendingProductSuggestionsUseCase } from './use-cases/product-suggestions/list-pending-product-suggestions.use-case.js';
+import {
+  ConfirmProductSuggestionController,
+  RejectProductSuggestionController,
+  ListPendingProductSuggestionsController,
+} from './controllers/product-suggestion.controllers.js';
 
 export const routes = Router();
 
@@ -49,6 +61,7 @@ const auditLogRepository = new PrismaAuditLogRepository();
 const stockRepository = new PrismaStockRepository();
 const companyRepository = new PrismaCompanyRepository();
 const invoicePersistenceRepository = new PrismaInvoicePersistenceRepository();
+const productSuggestionRepository = new PrismaProductSuggestionRepository();
 
 // Injeção - Notas Fiscais e Auditoria
 const readInvoiceUseCase = new ReadInvoiceUseCase(
@@ -61,7 +74,7 @@ const readInvoiceUseCase = new ReadInvoiceUseCase(
 );
 
 const uploadInvoiceController = new UploadInvoiceController(readInvoiceUseCase, storageProvider);
-const listProductsUseCase = new ListProductsUseCase(productRepository);
+const listProductsUseCase = new ListProductsUseCase(productRepository, stockRepository);
 const listProductsController = new ListProductsController(listProductsUseCase);
 
 // Compartilhado - Usuários
@@ -84,6 +97,15 @@ const createCompanyUseCase = new CreateCompanyUseCase(
   auditLogRepository
 );
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
+const confirmSuggestionController = new ConfirmProductSuggestionController(
+  new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository),
+);
+const rejectSuggestionController = new RejectProductSuggestionController(
+  new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository),
+);
+const listSuggestionsController = new ListPendingProductSuggestionsController(
+  new ListPendingProductSuggestionsUseCase(productSuggestionRepository, stockRepository),
+);
 
 // ROTAS
 routes.post(
@@ -103,3 +125,7 @@ routes.get('/products', ensureAuthenticated, validateQuery(listProductsQuerySche
 
 // ROTA DE CRIAÇÃO DE EMPRESA
 routes.post('/companies', ensureAuthenticated, validateBody(createCompanyBodySchema), createCompanyController.handle.bind(createCompanyController));
+
+routes.get('/stocks/:stockId/suggestions', ensureAuthenticated, validateParams(stockSuggestionParamsSchema), listSuggestionsController.handle.bind(listSuggestionsController));
+routes.post('/suggestions/:suggestionId/confirm', ensureAuthenticated, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), confirmSuggestionController.handle.bind(confirmSuggestionController));
+routes.post('/suggestions/:suggestionId/reject', ensureAuthenticated, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), rejectSuggestionController.handle.bind(rejectSuggestionController));

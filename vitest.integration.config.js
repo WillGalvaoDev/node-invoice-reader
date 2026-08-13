@@ -1,0 +1,12 @@
+import { defineConfig } from 'vitest/config';
+export default defineConfig({
+    test: {
+        include: ['test/integration/**/*.integration.spec.ts'],
+        setupFiles: ['test/integration/setup.ts'],
+        fileParallelism: false,
+        maxWorkers: 1,
+        testTimeout: 15_000,
+        hookTimeout: 15_000,
+    },
+});
+//# sourceMappingURL=vitest.integration.config.js.map

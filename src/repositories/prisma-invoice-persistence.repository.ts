@@ -1,21 +1,24 @@
-import type { Prisma } from '@prisma/client';
 import { ProductMapper } from '../mappers/product.mapper.js';
 import { prisma } from '../infra/prisma.js';
 import type { IInvoicePersistencePlan, IInvoicePersistenceRepository } from './invoice-persistence.repository.js';
 import type { IProduct } from './product.repository.js';
 import { AppError } from '../errors/app-error.js';
+import { upsertWeightedProductEntry } from './prisma-weighted-product-entry.js';
+import { isPrismaErrorCode } from '../errors/prisma-error.js';
 
 export class PrismaInvoicePersistenceRepository implements IInvoicePersistenceRepository {
-  async persist({ accessKey, stockId, operations }: IInvoicePersistencePlan): Promise<IProduct[]> {
+  async persist({ accessKey, stockId, operations, suggestions = [] }: IInvoicePersistencePlan): Promise<IProduct[]> {
     return prisma.$transaction(async (transaction) => {
       const products: IProduct[] = [];
+      let processedInvoiceId: string;
 
       try {
-        await transaction.processedInvoice.create({
+        const processedInvoice = await transaction.processedInvoice.create({
           data: { accessKey, stockId },
         });
+        processedInvoiceId = processedInvoice.id;
       } catch (error) {
-        if (this.isUniqueConstraintViolation(error)) {
+        if (isPrismaErrorCode(error, 'P2002')) {
           throw new AppError('Esta NF-e já foi processada.', 409);
         }
 
@@ -23,39 +26,22 @@ export class PrismaInvoicePersistenceRepository implements IInvoicePersistenceRe
       }
 
       for (const { product } of operations) {
-        const persisted = await this.upsertProduct(transaction, product);
+        const persisted = await upsertWeightedProductEntry(transaction, product);
         products.push(ProductMapper.toDomain(persisted));
+      }
+
+      if (suggestions.length > 0) {
+        await transaction.productSimilaritySuggestion.createMany({
+          data: suggestions.map((suggestion) => ({
+            ...suggestion,
+            processedInvoiceId,
+            stockId,
+          })),
+        });
       }
 
       return products;
     });
   }
 
-  private isUniqueConstraintViolation(error: unknown): boolean {
-    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
-  }
-
-  private upsertProduct(transaction: Prisma.TransactionClient, product: IProduct) {
-    return transaction.product.upsert({
-      where: {
-        stockId_code: { stockId: product.stockId, code: product.code },
-      },
-      create: {
-        code: product.code,
-        description: product.description,
-        quantity: product.quantity,
-        unitMeasurement: product.unitMeasurement,
-        unitPrice: product.unitPrice,
-        totalPrice: product.totalPrice,
-        stockId: product.stockId,
-        userId: product.userId ?? null,
-      },
-      update: {
-        quantity: { increment: product.quantity },
-        unitPrice: product.unitPrice,
-        totalPrice: product.totalPrice,
-        description: product.description,
-      },
-    });
-  }
 }

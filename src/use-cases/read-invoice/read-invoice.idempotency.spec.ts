@@ -10,7 +10,7 @@ describe('ReadInvoiceUseCase idempotency', () => {
     series: '1',
     issuedAt: new Date(),
     totalValue: 10,
-    supplier: { cnpj: '123', name: 'Supplier', stateRegistration: '1' },
+    supplier: { cnpj: '11222333000181', name: 'Supplier', stateRegistration: '1' },
     products: [{ code: 'A', description: 'A', quantity: 2, unitMeasurement: 'UN', unitPrice: 5, totalPrice: 10 }],
   };
   const storage = { readFile: vi.fn(), deleteFile: vi.fn() };

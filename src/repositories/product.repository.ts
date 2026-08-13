@@ -13,12 +13,22 @@ export interface IProduct {
   createdAt?: Date;
 }
 
+export interface IProductPageQuery {
+  stockId: string;
+  limit: number;
+  cursor?: string | undefined;
+}
+
+export interface IProductPage {
+  items: IProduct[];
+  nextCursor: string | null;
+}
+
 export interface IProductRepository {
   save(product: IProduct): Promise<IProduct>;
   findByCode(code: string, stockId: string): Promise<IProduct | null>;
-  findByUserId(userId: string): Promise<IProduct[]>;
-  findByStockId(stockId: string, userId?: string): Promise<IProduct[]>; // 👈 Recebe userId opcional para trava
-  findByCompanyId(companyId: string, userId?: string): Promise<IProduct[]>; // 👈 Recebe userId opcional para trava
+  findByStockId(stockId: string): Promise<IProduct[]>;
+  findPageByStockId(query: IProductPageQuery): Promise<IProductPage>;
   findById(id: string): Promise<IProduct | null>;
   update(id: string, data: Partial<IProduct>): Promise<IProduct>;
   delete(id: string): Promise<void>;

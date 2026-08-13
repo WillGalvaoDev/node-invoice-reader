@@ -13,18 +13,15 @@ export class ListProductsController {
       throw new AppError('Usuário não autenticado.', 401);
     }
 
-    const { stockId, companyId } = listProductsQuerySchema.parse(request.query);
+    const { stockId, limit, cursor } = listProductsQuerySchema.parse(request.query);
 
-    const products = await this.listProductsUseCase.execute({
-      userId,
-      stockId,
-      companyId,
-    });
+    const page = await this.listProductsUseCase.execute({ userId, stockId, limit, cursor });
 
     return response.status(200).json({
       status: 'success',
       data: {
-        products,
+        items: page.items,
+        nextCursor: page.nextCursor,
       },
     });
   }

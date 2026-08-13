@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const tx = vi.hoisted(() => ({
   processedInvoice: { create: vi.fn() },
-  product: { upsert: vi.fn() },
+  $queryRaw: vi.fn(),
   auditLog: { create: vi.fn() },
 }));
 const prismaMock = vi.hoisted(() => ({ $transaction: vi.fn() }));
@@ -12,7 +12,11 @@ describe('PrismaInvoicePersistenceRepository', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
-    tx.product.upsert.mockImplementation(async ({ create }) => ({ id: create.code, createdAt: new Date(), ean: null, ncm: null, ...create }));
+    tx.$queryRaw.mockImplementation(async (query) => [{
+      id: query.values[1], code: query.values[1], description: query.values[2], quantity: query.values[3],
+      unitMeasurement: query.values[4], unitPrice: query.values[5], totalPrice: query.values[6],
+      stockId: query.values[7], userId: query.values[8], createdAt: new Date(), ean: null, ncm: null,
+    }]);
     tx.processedInvoice.create.mockResolvedValue({ id: 'invoice-1' });
     tx.auditLog.create.mockResolvedValue({ id: 'audit-1' });
   });
@@ -21,7 +25,7 @@ describe('PrismaInvoicePersistenceRepository', () => {
     product: { code, description: code, quantity, unitMeasurement: 'UN', unitPrice: 2, totalPrice: 2, stockId: 'stock-1', userId: 'user-1' },
   });
 
-  it('usa um transaction client para identidade e todos os itens com incremento atômico', async () => {
+  it('usa um transaction client para identidade e todos os itens com upsert ponderado atômico', async () => {
     const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
     await new PrismaInvoicePersistenceRepository().persist({
       accessKey: '1'.repeat(44), stockId: 'stock-1',
@@ -30,12 +34,13 @@ describe('PrismaInvoicePersistenceRepository', () => {
 
     expect(prismaMock.$transaction).toHaveBeenCalledOnce();
     expect(tx.processedInvoice.create).toHaveBeenCalledWith({ data: { accessKey: '1'.repeat(44), stockId: 'stock-1' } });
-    expect(tx.processedInvoice.create.mock.invocationCallOrder[0]).toBeLessThan(tx.product.upsert.mock.invocationCallOrder[0]!);
-    expect(tx.product.upsert).toHaveBeenCalledTimes(2);
-    expect(tx.product.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      where: { stockId_code: { stockId: 'stock-1', code: 'A' } },
-      update: expect.objectContaining({ quantity: { increment: 2 } }),
-    }));
+    expect(tx.processedInvoice.create.mock.invocationCallOrder[0]).toBeLessThan(tx.$queryRaw.mock.invocationCallOrder[0]!);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    const sql = tx.$queryRaw.mock.calls[0]?.[0].strings.join(' ');
+    expect(sql).toContain('ON CONFLICT ("stockId", "code") DO UPDATE');
+    expect(sql).toContain('"products"."quantity" * "products"."unitPrice"');
+    expect(sql).toContain('EXCLUDED."quantity" * EXCLUDED."unitPrice"');
+    expect(sql).toContain('ROUND');
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
@@ -46,12 +51,12 @@ describe('PrismaInvoicePersistenceRepository', () => {
     });
 
     expect(tx.processedInvoice.create).toHaveBeenCalledOnce();
-    expect(tx.product.upsert).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('propaga falha do item N pelo callback para rollback e não grava auditoria', async () => {
-    tx.product.upsert.mockResolvedValueOnce({ id: 'A' }).mockRejectedValueOnce(new Error('item N failed'));
+    tx.$queryRaw.mockResolvedValueOnce([{ id: 'A' }]).mockRejectedValueOnce(new Error('item N failed'));
     const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
 
     await expect(new PrismaInvoicePersistenceRepository().persist({
@@ -64,9 +69,13 @@ describe('PrismaInvoicePersistenceRepository', () => {
 
   it('não perde incrementos em duas entradas concorrentes', async () => {
     let quantity = 10;
-    tx.product.upsert.mockImplementation(async ({ update, create }) => {
-      quantity += update.quantity.increment;
-      return { id: 'A', createdAt: new Date(), ean: null, ncm: null, ...create, quantity };
+    tx.$queryRaw.mockImplementation(async (query) => {
+      quantity += Number(query.values[3]);
+      return [{
+        id: 'A', code: query.values[1], description: query.values[2], quantity,
+        unitMeasurement: query.values[4], unitPrice: query.values[5], totalPrice: query.values[6],
+        stockId: query.values[7], userId: query.values[8], createdAt: new Date(), ean: null, ncm: null,
+      }];
     });
     const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
     const repository = new PrismaInvoicePersistenceRepository();
@@ -87,7 +96,7 @@ describe('PrismaInvoicePersistenceRepository', () => {
       accessKey: '1'.repeat(44), stockId: 'stock-1', operations: [product('A')],
     })).rejects.toMatchObject({ statusCode: 409 });
 
-    expect(tx.product.upsert).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
@@ -108,7 +117,7 @@ describe('PrismaInvoicePersistenceRepository', () => {
         throw error;
       }
     });
-    tx.product.upsert.mockRejectedValueOnce(new Error('item failed'));
+    tx.$queryRaw.mockRejectedValueOnce(new Error('item failed'));
     const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
     const repository = new PrismaInvoicePersistenceRepository();
     const plan = {
@@ -118,7 +127,11 @@ describe('PrismaInvoicePersistenceRepository', () => {
     await expect(repository.persist(plan)).rejects.toThrow('item failed');
     expect(persistedKeys).not.toContain(plan.accessKey);
 
-    tx.product.upsert.mockImplementationOnce(async ({ create }) => ({ id: create.code, createdAt: new Date(), ean: null, ncm: null, ...create }));
+    tx.$queryRaw.mockImplementationOnce(async (query) => [{
+      id: query.values[1], code: query.values[1], description: query.values[2], quantity: query.values[3],
+      unitMeasurement: query.values[4], unitPrice: query.values[5], totalPrice: query.values[6],
+      stockId: query.values[7], userId: query.values[8], createdAt: new Date(), ean: null, ncm: null,
+    }]);
     await expect(repository.persist(plan)).resolves.toHaveLength(1);
   });
 
@@ -141,6 +154,20 @@ describe('PrismaInvoicePersistenceRepository', () => {
     expect(results.filter((result) => result.status === 'rejected')[0]).toMatchObject({
       reason: expect.objectContaining({ statusCode: 409 }),
     });
-    expect(tx.product.upsert).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it('usa description recebida no INSERT sem sobrescrever description no conflito', async () => {
+    const { PrismaInvoicePersistenceRepository } = await import('./prisma-invoice-persistence.repository.js');
+    await new PrismaInvoicePersistenceRepository().persist({
+      accessKey: '8'.repeat(44), stockId: 'stock-1',
+      operations: [{ product: { ...product('A').product, description: 'Descrição extraída diferente' } }],
+    });
+
+    const query = tx.$queryRaw.mock.calls[0]?.[0];
+    const sql = query.strings.join(' ');
+    expect(query.values).toContain('Descrição extraída diferente');
+    expect(sql).toContain('INSERT INTO "products"');
+    expect(sql).not.toContain('"description" = EXCLUDED."description"');
   });
 });

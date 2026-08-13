@@ -95,7 +95,7 @@ describe('routes', () => {
       const response = await fetch(`${baseUrl}/companies`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'Empresa', cnpj: '123' }),
+        body: JSON.stringify({ name: 'Empresa', cnpj: '11222333000181' }),
         signal: AbortSignal.timeout(500),
       });
 
@@ -118,7 +118,7 @@ describe('routes', () => {
     const response = await fetch(`${baseUrl}/companies`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Empresa', cnpj: '123' }),
+      body: JSON.stringify({ name: 'Empresa', cnpj: '11222333000181' }),
     });
 
     expect(response.status).toBe(201);

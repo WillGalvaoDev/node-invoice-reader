@@ -26,13 +26,13 @@ describe('CreateCompanyUseCase', () => {
   it('deve ser possível criar uma empresa e gerar automaticamente o Estoque Principal', async () => {
     const response = await sut.execute({
       name: 'Empresa Exemplo LTDA',
-      cnpj: '12345678000199',
+      cnpj: '11.222.333/0001-81',
       ownerId: 'user-1',
     });
 
     expect(response.company.id).toEqual(expect.any(String));
     expect(response.company.name).toBe('Empresa Exemplo LTDA');
-    expect(response.company.cnpj).toBe('12345678000199');
+    expect(response.company.cnpj).toBe('11222333000181');
 
     // Verifica se o estoque principal foi criado atrelado a essa empresa
     expect(response.defaultStock.id).toEqual(expect.any(String));
@@ -43,13 +43,22 @@ describe('CreateCompanyUseCase', () => {
     expect(auditLogRepository.items).toHaveLength(1);
     expect(auditLogRepository.items[0]?.action).toBe('CREATE');
     expect(auditLogRepository.items[0]?.entity).toBe('COMPANY');
+    expect(auditLogRepository.items[0]).toMatchObject({
+      entityId: response.company.id,
+      companyId: response.company.id,
+      stockId: response.defaultStock.id,
+      userId: 'user-1',
+      description: 'Empresa criada com estoque principal.',
+      previousState: null,
+      newState: { companyId: response.company.id, defaultStockId: response.defaultStock.id },
+    });
   });
 
   it('não deve ser possível criar uma empresa sem nome', async () => {
     await expect(() =>
       sut.execute({
         name: '',
-        cnpj: '12345678000199',
+        cnpj: '11222333000181',
         ownerId: 'user-1',
       })
     ).rejects.toBeInstanceOf(AppError);
@@ -66,7 +75,7 @@ describe('CreateCompanyUseCase', () => {
   });
 
   it('não deve ser possível criar duas empresas com o mesmo CNPJ', async () => {
-    const cnpj = '12345678000199';
+    const cnpj = '11222333000181';
 
     await sut.execute({
       name: 'Empresa Original',
@@ -83,6 +92,24 @@ describe('CreateCompanyUseCase', () => {
     ).rejects.toBeInstanceOf(AppError);
   });
 
+  it('trata formatos e casing equivalentes como a mesma identidade', async () => {
+    await sut.execute({ name: 'Original', cnpj: '12.ABC.345/01DE-35', ownerId: 'user-1' });
+
+    await expect(sut.execute({ name: 'Duplicada', cnpj: '12abc34501de35', ownerId: 'user-2' }))
+      .rejects.toMatchObject({ statusCode: 409 });
+    expect(companyRepository.items).toHaveLength(1);
+    expect(companyRepository.items[0]?.cnpj).toBe('12ABC34501DE35');
+  });
+
+  it('rejeita CNPJ com DV inválido antes do repository', async () => {
+    const findByCnpj = vi.spyOn(companyRepository, 'findByCnpj');
+
+    await expect(sut.execute({ name: 'Inválida', cnpj: '12.ABC.345/01DE-34', ownerId: 'user-1' }))
+      .rejects.toMatchObject({ statusCode: 400 });
+    expect(findByCnpj).not.toHaveBeenCalled();
+    expect(companyRepository.items).toHaveLength(0);
+  });
+
   it('mantém company e stock criados quando o audit falha e registra somente contexto seguro', async () => {
     const failingAudit = {
       create: vi.fn().mockRejectedValue(new Error('database details')),
@@ -93,7 +120,7 @@ describe('CreateCompanyUseCase', () => {
     const useCase = new CreateCompanyUseCase(companyRepository, stockRepository, failingAudit, logger);
 
     const result = await useCase.execute({
-      name: 'Empresa Audit Isolado', cnpj: '98765432000199', ownerId: 'user-1', requestId: 'company-request',
+      name: 'Empresa Audit Isolado', cnpj: '04252011000110', ownerId: 'user-1', requestId: 'company-request',
     });
 
     expect(result.company.id).toBeDefined();
@@ -102,6 +129,6 @@ describe('CreateCompanyUseCase', () => {
       requestId: 'company-request', action: 'CREATE', entity: 'COMPANY', error: { name: 'Error' },
     });
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('database details');
-    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('98765432000199');
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('04252011000110');
   });
 });

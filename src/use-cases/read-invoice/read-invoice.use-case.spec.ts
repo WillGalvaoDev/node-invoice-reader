@@ -26,7 +26,7 @@ describe('ReadInvoiceUseCase', () => {
     issuedAt: new Date('2026-07-02'),
     totalValue: 350.00,
     supplier: {
-      cnpj: '12345678000199',
+      cnpj: '11222333000181',
       name: 'METALURGICA DO MEIER LTDA',
       stateRegistration: '987654321'
     },
@@ -124,7 +124,7 @@ describe('ReadInvoiceUseCase', () => {
     expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
 
     expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations[0]).toEqual({
-      product: { ...mockAiResult.products[0], stockId, userId }
+      product: expect.objectContaining({ ...mockAiResult.products[0], stockId, userId })
     });
 
     expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -132,6 +132,15 @@ describe('ReadInvoiceUseCase', () => {
       entity: 'INVOICE',
       userId,
       companyId: 'company-1',
+      stockId,
+      description: 'Invoice processada com sucesso.',
+      newState: { processedProductCount: 2, pendingSuggestionCount: 0 },
+    }));
+
+    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'CREATE', entity: 'PRODUCT', stockId, companyId: 'company-1', userId,
+      description: 'Entrada de estoque processada por invoice.', previousState: null,
+      newState: expect.objectContaining({ quantity: 50, unitPrice: 2.5, totalPrice: 125 }),
     }));
 
     expect(result.extractedData.invoiceNumber).toBe('000542');
@@ -166,7 +175,32 @@ describe('ReadInvoiceUseCase', () => {
 
     expect(productRepositoryMock.update).not.toHaveBeenCalled();
     expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].suggestions).toEqual([]);
     expect(result.processedProducts).toHaveLength(2);
+    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'UPDATE', entity: 'PRODUCT', entityId: 'existing-id-1', stockId: 'stock-1',
+      previousState: { quantity: 10, unitPrice: 2, totalPrice: 20 },
+      newState: expect.objectContaining({ quantity: 50 }),
+    }));
+  });
+
+  it('canonicaliza o CNPJ extraído e rejeita DV inválido antes de matching/persistência', async () => {
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce({
+      ...mockAiResult,
+      supplier: { ...mockAiResult.supplier, cnpj: '12.abc.345/01de-35' },
+    });
+    const valid = await sut.execute({ filePath: '/path/valid.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1' });
+    expect(valid.extractedData.supplier.cnpj).toBe('12ABC34501DE35');
+    const similarityCallsBeforeInvalidDanfe = aiProviderMock.findSimilarProduct.mock.calls.length;
+
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce({
+      ...mockAiResult,
+      supplier: { ...mockAiResult.supplier, cnpj: '12.ABC.345/01DE-34' },
+    });
+    await expect(sut.execute({ filePath: '/path/invalid.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1' }))
+      .rejects.toMatchObject({ statusCode: 422 });
+    expect(invoicePersistenceMock.persist).toHaveBeenCalledTimes(1);
+    expect(aiProviderMock.findSimilarProduct).toHaveBeenCalledTimes(similarityCallsBeforeInvalidDanfe);
   });
 
   it('limita e ordena candidatos do estoque antes de chamar similarity em catálogo grande', async () => {
@@ -244,9 +278,20 @@ describe('ReadInvoiceUseCase', () => {
     const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
 
     expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]).toMatchObject({ id: expect.any(String), status: 'PENDING' });
     expect(result.suggestions[0]?.suggestedProduct.id).toBe('similar-id');
     expect(result.suggestions[0]?.confidence).toBe(0.88);
     expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations).toHaveLength(1);
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].suggestions).toEqual([
+      expect.objectContaining({
+        id: result.suggestions[0]?.id,
+        itemIndex: 0,
+        suggestedProductId: 'similar-id',
+        receivedQuantity: 50,
+        receivedUnitPrice: 2.5,
+        confidence: 0.88,
+      }),
+    ]);
   });
 
   it('deve lançar AppError e deletar o arquivo temporário quando a IA retornar uma estrutura inválida ou sem produtos', async () => {
@@ -316,6 +361,7 @@ describe('ReadInvoiceUseCase', () => {
 
   it('deve lançar AppError, registrar log de auditoria de falha e deletar o arquivo temporário quando o estoque informado não existir ou não for encontrado', async () => {
   stockRepositoryMock.findByIdForUser.mockResolvedValueOnce(null);
+  stockRepositoryMock.findById.mockResolvedValueOnce(null);
 
   await expect(
     sut.execute({
@@ -332,13 +378,39 @@ describe('ReadInvoiceUseCase', () => {
       action: 'UNAUTHORIZED_ACCESS',
       entity: 'INVOICE',
       userId: 'user-any-id',
-      details: expect.stringContaining('unauthorized-stock-id'),
+      description: 'Tentativa de acesso não autorizado ao estoque.',
     })
   );
 
   expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
   expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
   expect(productRepositoryMock.save).not.toHaveBeenCalled();
+  });
+
+  it('inclui produto novo anterior da mesma nota na comparação e persiste itens distintos', async () => {
+    const baseItem = mockAiResult.products[0]!;
+    const twoItems = {
+      ...mockAiResult,
+      products: [
+        { ...baseItem, code: 'FIRST', description: 'PARAFUSO NOVO' },
+        { ...baseItem, code: 'SECOND', description: 'PARAFUSO NOVO SIMILAR' },
+      ],
+    };
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce(twoItems);
+    aiProviderMock.findSimilarProduct.mockImplementationOnce(async (_description, candidates) => ({
+      product: candidates[0]!, confidence: 0.9, reason: 'mesmo produto',
+    }));
+
+    await sut.execute({ filePath: '/path/two-items.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
+
+    const persistedPlan = invoicePersistenceMock.persist.mock.calls[0]![0];
+    expect(persistedPlan.operations).toHaveLength(1);
+    expect(aiProviderMock.findSimilarProduct.mock.calls[0]?.[1]).toEqual([
+      expect.objectContaining({ id: expect.any(String), code: 'FIRST' }),
+    ]);
+    expect(persistedPlan.suggestions).toEqual([
+      expect.objectContaining({ itemIndex: 1, suggestedProductId: persistedPlan.operations[0]!.product.id }),
+    ]);
   });
 
   it('permite que o owner processe DANFE no estoque da própria empresa', async () => {
@@ -408,6 +480,9 @@ describe('ReadInvoiceUseCase', () => {
     ['collaborator sem canCreate', 'collaborator-without-create'],
   ])('nega %s antes do Gemini e de qualquer escrita', async (_scenario, userId) => {
     stockRepositoryMock.findByIdForUser.mockResolvedValueOnce(null);
+    stockRepositoryMock.findById.mockResolvedValueOnce({
+      id: 'stock-from-another-company', name: 'Outro estoque', companyId: 'company-1',
+    });
 
     await expect(
       sut.execute({
@@ -418,12 +493,14 @@ describe('ReadInvoiceUseCase', () => {
       })
     ).rejects.toMatchObject({ statusCode: 403 });
 
-    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith({
+    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
       action: 'UNAUTHORIZED_ACCESS',
       entity: 'INVOICE',
       userId,
-      details: expect.stringContaining('stock-from-another-company'),
-    });
+      stockId: 'stock-from-another-company',
+      companyId: 'company-1',
+      description: 'Tentativa de acesso não autorizado ao estoque.',
+    }));
     expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
     expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
     expect(productRepositoryMock.findByStockId).not.toHaveBeenCalled();
@@ -431,5 +508,22 @@ describe('ReadInvoiceUseCase', () => {
     expect(productRepositoryMock.save).not.toHaveBeenCalled();
     expect(productRepositoryMock.update).not.toHaveBeenCalled();
     expect(invoicePersistenceMock.persist).not.toHaveBeenCalled();
+  });
+
+  it('rejeita DANFE incoerente antes de exact match, similarity e persistência', async () => {
+    aiProviderMock.extractDanfeData.mockResolvedValueOnce({
+      ...mockAiResult,
+      totalValue: 10,
+      products: [{ ...mockAiResult.products[0]!, quantity: 2, unitPrice: 10, totalPrice: 200 }],
+    });
+
+    await expect(sut.execute({ filePath: '/path/incoherent.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'owner-1' }))
+      .rejects.toMatchObject({ statusCode: 422, message: 'Os valores extraídos do DANFE são inconsistentes.' });
+    expect(productRepositoryMock.findByStockId).not.toHaveBeenCalled();
+    expect(productRepositoryMock.findByCode).not.toHaveBeenCalled();
+    expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist).not.toHaveBeenCalled();
+    expect(auditLogRepositoryMock.create).not.toHaveBeenCalled();
+    expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/incoherent.png');
   });
 });

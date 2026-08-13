@@ -1,0 +1,1 @@
+{"version":3,"file":"product.mapper.d.ts","sourceRoot":"","sources":["product.mapper.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,OAAO,IAAI,aAAa,EAAE,MAAM,gBAAgB,CAAC;AAC/D,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,uCAAuC,CAAC;AAEtE,qBAAa,aAAa;IACxB,MAAM,CAAC,QAAQ,CAAC,GAAG,EAAE,aAAa,GAAG,QAAQ;CAgB9C"}

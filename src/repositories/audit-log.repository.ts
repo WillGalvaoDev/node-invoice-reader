@@ -5,6 +5,8 @@ export type AuditAction =
   | 'READ' 
   | 'UNAUTHORIZED_ACCESS'; // 👈 Adicionado evento explícito de segurança
 
+export type AuditState = Record<string, string | number | boolean | null>;
+
 export interface IAuditLog {
   id?: string;
   action: AuditAction;
@@ -13,6 +15,10 @@ export interface IAuditLog {
   details?: string | null;
   userId?: string | null;
   companyId?: string | null;
+  stockId?: string | null;
+  description?: string | null;
+  previousState?: AuditState | null;
+  newState?: AuditState | null;
   createdAt?: Date;
 }
 

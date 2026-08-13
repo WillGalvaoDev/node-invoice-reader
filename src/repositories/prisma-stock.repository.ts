@@ -1,14 +1,27 @@
 import type { IStockRepository, IStock } from './stock.repository.js';
 import { prisma } from '../infra/prisma.js';
+import { AppError } from '../errors/app-error.js';
+import { isPrismaErrorCode } from '../errors/prisma-error.js';
 
 export class PrismaStockRepository implements IStockRepository {
   async create(stock: IStock): Promise<IStock> {
-    const createdStock = await prisma.stock.create({
-      data: {
-        name: stock.name,
-        companyId: stock.companyId,
-      },
-    });
+    let createdStock;
+    try {
+      createdStock = await prisma.stock.create({
+        data: {
+          name: stock.name,
+          companyId: stock.companyId,
+        },
+      });
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) {
+        throw new AppError('Já existe um estoque com este nome nesta empresa.', 409);
+      }
+      if (isPrismaErrorCode(error, 'P2003')) {
+        throw new AppError('Empresa relacionada inválida.', 400);
+      }
+      throw error;
+    }
 
     return createdStock as IStock;
   }
@@ -43,6 +56,28 @@ export class PrismaStockRepository implements IStockRepository {
       },
     });
 
+    return stock as IStock | null;
+  }
+
+  async findByIdForViewer(id: string, userId: string): Promise<IStock | null> {
+    const stock = await prisma.stock.findFirst({
+      where: {
+        id,
+        company: {
+          OR: [
+            { ownerId: userId },
+            {
+              collaborators: {
+                some: {
+                  userId,
+                  permissions: { some: { stockId: id, canView: true } },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
     return stock as IStock | null;
   }
 

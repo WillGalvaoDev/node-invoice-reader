@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cnpjSchema } from './cnpj.schema.js';
 
 const finiteNonNegativeNumber = z.number().finite().nonnegative();
 const finitePositiveNumber = z.number().finite().positive();
@@ -19,7 +20,7 @@ export const danfeResponseSchema = z.object({
   issuedAt: issuedAtSchema,
   totalValue: finiteNonNegativeNumber,
   supplier: z.object({
-    cnpj: z.string().min(1),
+    cnpj: cnpjSchema,
     name: z.string().min(1),
     stateRegistration: z.string().min(1).optional(),
   }),

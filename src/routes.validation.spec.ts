@@ -103,6 +103,20 @@ describe('validação declarativa HTTP', () => {
     expect(handles.createCompany).not.toHaveBeenCalled();
   });
 
+  it('canonicaliza CNPJ numérico/alfanumérico e rejeita DV inválido antes do controller', async () => {
+    const numeric = await post('/companies', { name: 'Empresa Numérica', cnpj: '11.222.333/0001-81' });
+    expect(numeric.status).toBe(201);
+    await expect(numeric.json()).resolves.toEqual({ received: { name: 'Empresa Numérica', cnpj: '11222333000181' } });
+
+    const alphanumeric = await post('/companies', { name: 'Empresa Alfa', cnpj: ' 12.abc.345/01de-35 ' });
+    expect(alphanumeric.status).toBe(201);
+    await expect(alphanumeric.json()).resolves.toEqual({ received: { name: 'Empresa Alfa', cnpj: '12ABC34501DE35' } });
+
+    const invalid = await post('/companies', { name: 'Empresa Inválida', cnpj: '12.ABC.345/01DE-34' });
+    expect(invalid.status).toBe(400);
+    expect(handles.createCompany).toHaveBeenCalledTimes(2);
+  });
+
   it('rejeita query inválida/inesperada e aceita UUIDs válidos', async () => {
     const invalid = await fetch(`${baseUrl}/products?stockId=not-a-uuid&admin=true`);
     expect(invalid.status).toBe(400);
@@ -113,7 +127,21 @@ describe('validação declarativa HTTP', () => {
     expect(handles.listProducts).toHaveBeenCalledOnce();
   });
 
-  it('rejeita companyId redundante quando stockId determina o tenant', async () => {
+  it('exige stockId, aplica limit default e valida limit/cursor', async () => {
+    const stockId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const cursor = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+    expect((await fetch(`${baseUrl}/products`)).status).toBe(400);
+    expect((await fetch(`${baseUrl}/products?stockId=${stockId}&limit=0`)).status).toBe(400);
+    expect((await fetch(`${baseUrl}/products?stockId=${stockId}&limit=201`)).status).toBe(400);
+    expect((await fetch(`${baseUrl}/products?stockId=${stockId}&cursor=invalid`)).status).toBe(400);
+
+    const valid = await fetch(`${baseUrl}/products?stockId=${stockId}&limit=2&cursor=${cursor}`);
+    expect(valid.status).toBe(200);
+    expect(handles.listProducts).toHaveBeenCalledOnce();
+  });
+
+  it('rejeita companyId porque o estoque determina o tenant', async () => {
     const stockId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const companyId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     const response = await fetch(`${baseUrl}/products?stockId=${stockId}&companyId=${companyId}`);
