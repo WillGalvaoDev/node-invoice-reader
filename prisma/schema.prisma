@@ -65,9 +65,21 @@ model Stock {
   products    Product[]
   permissions StockPermission[]
   auditLogs   AuditLog[]
+  processedInvoices ProcessedInvoice[]
 
   @@unique([companyId, name])
   @@map("stocks")
+}
+
+model ProcessedInvoice {
+  id        String   @id @default(uuid())
+  accessKey String   @unique
+  stockId   String
+  createdAt DateTime @default(now())
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@map("processed_invoices")
 }
 
 model StockPermission {

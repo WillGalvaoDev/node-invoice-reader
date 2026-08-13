@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { AppError } from '../errors/app-error.js';
+import multer from 'multer';
 
 export function errorHandler(
   error: Error,
@@ -9,6 +10,13 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   next: NextFunction
 ) {
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return response.status(413).json({
+      status: 'error',
+      message: 'Arquivo excede o limite de 10 MiB.',
+    });
+  }
+
   // Se for um erro conhecido da nossa aplicação (lançado via AppError)
   if (error instanceof AppError) {
     return response.status(error.statusCode).json({

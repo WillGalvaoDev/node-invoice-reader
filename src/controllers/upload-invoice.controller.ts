@@ -2,9 +2,14 @@
 import type { Request, Response } from 'express';
 import { ReadInvoiceUseCase } from '../use-cases/read-invoice/read-invoice.use-case.js';
 import { AppError } from '../errors/app-error.js';
+import type { IStorageProvider } from '../providers/storage.provider.js';
+import { isDanfeMimeType } from '../config/upload.js';
 
 export class UploadInvoiceController {
-  constructor(private readInvoiceUseCase: ReadInvoiceUseCase) {}
+  constructor(
+    private readInvoiceUseCase: ReadInvoiceUseCase,
+    private storageProvider: IStorageProvider,
+  ) {}
 
   async handle(request: Request, response: Response): Promise<Response> {
     // 1. Valida se o arquivo veio na requisição
@@ -16,15 +21,23 @@ export class UploadInvoiceController {
     const { stockId, companyId } = request.body;
 
     if (!stockId) {
+      await this.storageProvider.deleteFile(request.file.path);
       throw new AppError('ID do estoque (stockId) é obrigatório.', 400);
     }
 
     const filePath = request.file.path;
+    const mimeType = request.file.mimetype;
+
+    if (!isDanfeMimeType(mimeType)) {
+      await this.storageProvider.deleteFile(filePath);
+      throw new AppError('Tipo de arquivo não suportado.', 415);
+    }
     const userId = request.user?.id;
 
     // 3. Executa o Use Case
     const { extractedData, processedProducts, suggestions } = await this.readInvoiceUseCase.execute({
       filePath,
+      mimeType,
       stockId,
       userId,
       companyId,

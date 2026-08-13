@@ -1,15 +1,6 @@
-import { PrismaClient, type AuditAction } from '@prisma/client';
+import type { AuditAction } from '@prisma/client';
 import type { IAuditLogRepository, IAuditLog } from './audit-log.repository.js';
-import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../infra/prisma.js';
 
 export class PrismaAuditLogRepository implements IAuditLogRepository {
   async create(log: IAuditLog): Promise<IAuditLog> {

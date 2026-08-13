@@ -4,9 +4,12 @@ import type { IProductRepository, IProduct } from '../../repositories/product.re
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
 import { AppError } from '../../errors/app-error.js';
+import type { IInvoicePersistenceRepository, IInvoiceProductOperation } from '../../repositories/invoice-persistence.repository.js';
+import type { DanfeMimeType } from '../../config/upload.js';
 
 interface IReadInvoiceRequest {
   filePath: string;
+  mimeType: DanfeMimeType;
   stockId: string;
   userId?: string | undefined;
   companyId?: string | undefined;
@@ -31,7 +34,8 @@ export class ReadInvoiceUseCase {
     private readonly aiProvider: IAiProvider,
     private readonly productRepository: IProductRepository,
     private readonly auditLogRepository: IAuditLogRepository,
-    private readonly stockRepository: IStockRepository
+    private readonly stockRepository: IStockRepository,
+    private readonly invoicePersistenceRepository: IInvoicePersistenceRepository
   ) {}
 
   private sanitizeString(input: string): string {
@@ -42,28 +46,32 @@ export class ReadInvoiceUseCase {
       .trim();
   }
 
-  async execute({ filePath, stockId, userId, companyId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
+  async execute({ filePath, mimeType, stockId, userId, companyId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
-      // 🔒 VALIDAÇÃO DE AUTORIZAÇÃO / EXISTÊNCIA DO ESTOQUE
-      const stockExists = await this.stockRepository.findById(stockId);
+      const authorizedStock = userId
+        ? await this.stockRepository.findByIdForUser(stockId, userId)
+        : null;
 
-if (!stockExists) {
-  await this.auditLogRepository.create({
-    action: 'UNAUTHORIZED_ACCESS',
-    entity: 'INVOICE',
-    details: `Tentativa de acesso negada ao estoque: ${stockId}`,
-    ...(userId && { userId }),
-    ...(companyId && { companyId }),
-  });
+      if (!authorizedStock) {
+        await this.auditLogRepository.create({
+          action: 'UNAUTHORIZED_ACCESS',
+          entity: 'INVOICE',
+          details: `Tentativa de acesso negada ao estoque: ${stockId}`,
+          ...(userId && { userId }),
+        });
 
-  throw new AppError('Acesso não autorizado ao estoque informado.', 403);
-}
+        throw new AppError('Acesso não autorizado ao estoque informado.', 403);
+      }
 
       // 1. Extrai os dados da nota fiscal via Gemini OCR
-      const extractedData = await this.aiProvider.extractDanfeData(filePath);
+      const extractedData = await this.aiProvider.extractDanfeData(filePath, mimeType);
 
       if (!extractedData || !extractedData.products || extractedData.products.length === 0) {
         throw new AppError('Falha ao extrair produtos do DANFE. Nenhum item válido encontrado.', 400);
+      }
+
+      if (!/^\d{44}$/.test(extractedData.accessKey)) {
+        throw new AppError('Chave de acesso da NF-e inválida.', 422);
       }
 
       const hasInvalidNumbers = extractedData.products.some(
@@ -76,6 +84,7 @@ if (!stockExists) {
 
       const processedProducts: IProduct[] = [];
       const suggestions: IProductSuggestion[] = [];
+      const operations: IInvoiceProductOperation[] = [];
 
       const existingStockProducts = await this.productRepository.findByStockId(stockId);
 
@@ -87,14 +96,16 @@ if (!stockExists) {
 
         const existingByCode = await this.productRepository.findByCode(item.code, stockId);
 
-        if (existingByCode && existingByCode.id) {
-          const updatedProduct = await this.productRepository.update(existingByCode.id, {
-            quantity: existingByCode.quantity + Number(item.quantity),
-            unitPrice: Number(item.unitPrice),
-            totalPrice: Number(item.totalPrice),
-            description: item.description,
+        if (existingByCode) {
+          operations.push({
+            product: {
+              ...existingByCode,
+              description: item.description,
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+              totalPrice: Number(item.totalPrice),
+            },
           });
-          processedProducts.push(updatedProduct);
           continue;
         }
 
@@ -111,28 +122,33 @@ if (!stockExists) {
           continue;
         }
 
-        const newProduct = await this.productRepository.save({
-          code: item.code,
-          description: item.description,
-          quantity: Number(item.quantity),
-          unitMeasurement: item.unitMeasurement,
-          unitPrice: Number(item.unitPrice),
-          totalPrice: Number(item.totalPrice),
-          stockId,
-          userId: userId ?? null,
+        operations.push({
+          product: {
+            code: item.code,
+            description: item.description,
+            quantity: Number(item.quantity),
+            unitMeasurement: item.unitMeasurement,
+            unitPrice: Number(item.unitPrice),
+            totalPrice: Number(item.totalPrice),
+            stockId,
+            userId: userId ?? null,
+          },
         });
-
-        processedProducts.push(newProduct);
       }
 
-      await this.auditLogRepository.create({
-        action: 'CREATE',
-        entity: 'INVOICE',
-        entityId: extractedData.accessKey || extractedData.invoiceNumber,
-        details: `Nota Fiscal nº ${extractedData.invoiceNumber} lida. ${processedProducts.length} produtos processados, ${suggestions.length} sugestões pendentes.`,
-        ...(userId && { userId }),
-        ...(companyId && { companyId }),
-      });
+      processedProducts.push(...await this.invoicePersistenceRepository.persist({
+        accessKey: extractedData.accessKey,
+        stockId,
+        operations,
+        auditLog: {
+          action: 'CREATE',
+          entity: 'INVOICE',
+          entityId: extractedData.accessKey,
+          details: `Nota Fiscal nº ${extractedData.invoiceNumber} lida. ${operations.length} produtos processados, ${suggestions.length} sugestões pendentes.`,
+          ...(userId && { userId }),
+          ...(companyId && { companyId }),
+        },
+      }));
 
       return {
         extractedData,

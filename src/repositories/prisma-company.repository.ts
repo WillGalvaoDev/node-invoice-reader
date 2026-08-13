@@ -1,15 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import type { ICompanyRepository, ICompany } from './company.repository.js';
-import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../infra/prisma.js';
 
 export class PrismaCompanyRepository implements ICompanyRepository {
   async create(company: ICompany): Promise<ICompany> {

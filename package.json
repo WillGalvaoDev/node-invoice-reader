@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
+    "test:integration:postgres": "vitest run --config vitest.integration.config.ts",
+    "test:integration:postgres:docker": "node scripts/postgres-integration.mjs",
     "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc"
   },
@@ -28,6 +30,7 @@
     "@prisma/client": "^7.8.0",
     "argon2": "^0.45.0",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.0",
     "jose": "^6.2.3",

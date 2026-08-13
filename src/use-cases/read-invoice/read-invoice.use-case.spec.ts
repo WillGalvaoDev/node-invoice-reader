@@ -6,6 +6,7 @@ import type { IAiProvider, IDanfeExtractResult } from '../../providers/ai.provid
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
+import type { IInvoicePersistenceRepository } from '../../repositories/invoice-persistence.repository.js';
 
 describe('ReadInvoiceUseCase', () => {
   let storageProviderMock: Mocked<IStorageProvider>;
@@ -13,6 +14,7 @@ describe('ReadInvoiceUseCase', () => {
   let productRepositoryMock: Mocked<IProductRepository>;
   let auditLogRepositoryMock: Mocked<IAuditLogRepository>;
   let stockRepositoryMock: Mocked<IStockRepository>;
+  let invoicePersistenceMock: Mocked<IInvoicePersistenceRepository>;
   let sut: ReadInvoiceUseCase;
 
   const mockAiResult: IDanfeExtractResult = {
@@ -68,6 +70,11 @@ describe('ReadInvoiceUseCase', () => {
     } as unknown as Mocked<IProductRepository>;
 
     stockRepositoryMock = {
+      findByIdForUser: vi.fn().mockResolvedValue({
+        id: 'stock-1',
+        name: 'Estoque Principal',
+        companyId: 'company-1',
+      }),
       findById: vi.fn().mockResolvedValue({
         id: 'stock-1',
         name: 'Estoque Principal',
@@ -83,12 +90,19 @@ describe('ReadInvoiceUseCase', () => {
       findByUserId: vi.fn().mockResolvedValue([])
     } as unknown as Mocked<IAuditLogRepository>;
 
+    invoicePersistenceMock = {
+      persist: vi.fn().mockImplementation(async ({ operations }: { operations: Array<{ product: IProduct }> }) =>
+        operations.map(({ product }, index) => ({ id: `persisted-${index + 1}`, ...product }))
+      ),
+    } as Mocked<IInvoicePersistenceRepository>;
+
     sut = new ReadInvoiceUseCase(
       storageProviderMock,
       aiProviderMock,
       productRepositoryMock,
       auditLogRepositoryMock,
-      stockRepositoryMock
+      stockRepositoryMock,
+      invoicePersistenceMock
     );
   });
 
@@ -97,18 +111,16 @@ describe('ReadInvoiceUseCase', () => {
     const userId = 'user-any-id';
     const stockId = 'stock-1';
 
-    const result = await sut.execute({ filePath, stockId, userId });
+    const result = await sut.execute({ filePath, mimeType: 'image/jpeg', stockId, userId });
 
-    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(filePath);
-    expect(productRepositoryMock.save).toHaveBeenCalledTimes(2);
+    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(filePath, 'image/jpeg');
+    expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
 
-    expect(productRepositoryMock.save).toHaveBeenNthCalledWith(1, {
-      ...mockAiResult.products[0],
-      stockId,
-      userId
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations[0]).toEqual({
+      product: { ...mockAiResult.products[0], stockId, userId }
     });
 
-    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith(
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].auditLog).toEqual(
       expect.objectContaining({
         action: 'CREATE',
         entity: 'INVOICE',
@@ -140,18 +152,14 @@ describe('ReadInvoiceUseCase', () => {
       return Promise.resolve(null);
     });
 
-    const result = await sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' });
+    const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
 
-    expect(productRepositoryMock.update).toHaveBeenCalledWith('existing-id-1', {
-      quantity: 60,
-      unitPrice: 2.50,
-      totalPrice: 125.00,
-      description: 'PARAF SEXTAVADO 1/4 X 2'
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations[0]).toEqual({
+      product: expect.objectContaining({ code: '0982', quantity: 50 })
     });
 
-    expect(productRepositoryMock.save).toHaveBeenCalledTimes(1);
+    expect(productRepositoryMock.update).not.toHaveBeenCalled();
     expect(result.processedProducts).toHaveLength(2);
-    expect(auditLogRepositoryMock.create).toHaveBeenCalled();
   });
 
   it('deve gerar uma sugestão de vínculo quando a IA encontrar um produto similar no estoque', async () => {
@@ -180,13 +188,12 @@ describe('ReadInvoiceUseCase', () => {
       return Promise.resolve(null);
     });
 
-    const result = await sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' });
+    const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
 
     expect(result.suggestions).toHaveLength(1);
     expect(result.suggestions[0]?.suggestedProduct.id).toBe('similar-id');
     expect(result.suggestions[0]?.confidence).toBe(0.88);
-    expect(productRepositoryMock.save).toHaveBeenCalledTimes(1);
-    expect(auditLogRepositoryMock.create).toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations).toHaveLength(1);
   });
 
   it('deve lançar AppError e deletar o arquivo temporário quando a IA retornar uma estrutura inválida ou sem produtos', async () => {
@@ -198,7 +205,7 @@ describe('ReadInvoiceUseCase', () => {
     aiProviderMock.extractDanfeData.mockResolvedValueOnce(invalidAiResult as unknown as IDanfeExtractResult);
 
     await expect(
-      sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' })
+      sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' })
     ).rejects.toThrow('Falha ao extrair produtos do DANFE. Nenhum item válido encontrado.');
 
     expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
@@ -223,7 +230,7 @@ describe('ReadInvoiceUseCase', () => {
     aiProviderMock.extractDanfeData.mockResolvedValueOnce(maliciousAiResult);
 
     await expect(
-      sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' })
+      sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' })
     ).rejects.toThrow('Os produtos do DANFE contêm valores ou quantidades inválidas.');
 
     expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
@@ -247,21 +254,20 @@ describe('ReadInvoiceUseCase', () => {
 
     aiProviderMock.extractDanfeData.mockResolvedValueOnce(promptInjectionAiResult);
 
-    await sut.execute({ filePath: '/path/nota.png', stockId: 'stock-1', userId: 'user-any-id' });
+    await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
 
-    expect(productRepositoryMock.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        description: 'PARAFUSO AÇO INOX -- IGNORE REST'
-      })
-    );
+    expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations[0]).toEqual({
+      product: expect.objectContaining({ description: 'PARAFUSO AÇO INOX -- IGNORE REST' })
+    });
   });
 
   it('deve lançar AppError, registrar log de auditoria de falha e deletar o arquivo temporário quando o estoque informado não existir ou não for encontrado', async () => {
-  stockRepositoryMock.findById.mockResolvedValueOnce(null);
+  stockRepositoryMock.findByIdForUser.mockResolvedValueOnce(null);
 
   await expect(
     sut.execute({
       filePath: '/path/nota.png',
+      mimeType: 'image/png',
       stockId: 'unauthorized-stock-id',
       userId: 'user-any-id',
     })
@@ -280,5 +286,52 @@ describe('ReadInvoiceUseCase', () => {
   expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
   expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
   expect(productRepositoryMock.save).not.toHaveBeenCalled();
-});
+  });
+
+  it('permite que o owner processe DANFE no estoque da própria empresa', async () => {
+    await sut.execute({ filePath: '/path/owner.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'owner-1' });
+
+    expect(stockRepositoryMock.findByIdForUser).toHaveBeenCalledWith('stock-1', 'owner-1');
+    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith('/path/owner.png', 'image/png');
+    expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
+  });
+
+  it('permite que collaborator com canCreate processe entrada', async () => {
+    await sut.execute({ filePath: '/path/collaborator.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'collaborator-1' });
+
+    expect(stockRepositoryMock.findByIdForUser).toHaveBeenCalledWith('stock-1', 'collaborator-1');
+    expect(aiProviderMock.extractDanfeData).toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['usuário sem vínculo de outra empresa', 'outsider-1'],
+    ['collaborator sem canCreate', 'collaborator-without-create'],
+  ])('nega %s antes do Gemini e de qualquer escrita', async (_scenario, userId) => {
+    stockRepositoryMock.findByIdForUser.mockResolvedValueOnce(null);
+
+    await expect(
+      sut.execute({
+        filePath: '/path/denied.png',
+        mimeType: 'image/png',
+        stockId: 'stock-from-another-company',
+        userId,
+        companyId: 'spoofed-company-id',
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    expect(auditLogRepositoryMock.create).toHaveBeenCalledWith({
+      action: 'UNAUTHORIZED_ACCESS',
+      entity: 'INVOICE',
+      userId,
+      details: expect.stringContaining('stock-from-another-company'),
+    });
+    expect(aiProviderMock.extractDanfeData).not.toHaveBeenCalled();
+    expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
+    expect(productRepositoryMock.findByStockId).not.toHaveBeenCalled();
+    expect(productRepositoryMock.findByCode).not.toHaveBeenCalled();
+    expect(productRepositoryMock.save).not.toHaveBeenCalled();
+    expect(productRepositoryMock.update).not.toHaveBeenCalled();
+    expect(invoicePersistenceMock.persist).not.toHaveBeenCalled();
+  });
 });

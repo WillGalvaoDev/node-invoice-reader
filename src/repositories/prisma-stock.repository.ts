@@ -1,15 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import type { IStockRepository, IStock } from './stock.repository.js';
-import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../infra/prisma.js';
 
 export class PrismaStockRepository implements IStockRepository {
   async create(stock: IStock): Promise<IStock> {
@@ -26,6 +16,31 @@ export class PrismaStockRepository implements IStockRepository {
   async findById(id: string): Promise<IStock | null> {
     const stock = await prisma.stock.findUnique({
       where: { id },
+    });
+
+    return stock as IStock | null;
+  }
+
+  async findByIdForUser(id: string, userId: string): Promise<IStock | null> {
+    const stock = await prisma.stock.findFirst({
+      where: {
+        id,
+        company: {
+          OR: [
+            { ownerId: userId },
+            {
+              collaborators: {
+                some: {
+                  userId,
+                  permissions: {
+                    some: { stockId: id, canCreate: true },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
     });
 
     return stock as IStock | null;

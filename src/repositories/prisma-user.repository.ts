@@ -1,15 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import type { IUserRepository, IUser } from './user.repository.js';
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
-import "dotenv/config";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../infra/prisma.js';
 
 export class PrismaUserRepository implements IUserRepository {
   async create(user: Omit<IUser, 'id' | 'createdAt'> & { password: string }): Promise<IUser> {

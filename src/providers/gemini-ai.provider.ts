@@ -1,37 +1,158 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import type { Schema } from '@google/genai';
+import type { GenerateContentParameters, GenerateContentResponse, Schema } from '@google/genai';
 import type { IAiProvider, IDanfeExtractResult, ISimilarityMatch } from '../providers/ai.provider.js';
 import type { IProduct } from '../repositories/product.repository.js';
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from 'node:fs/promises';
 import { AppError } from '../errors/app-error.js';
+import { env } from '../config/env.js';
+import { isDanfeMimeType, type DanfeMimeType } from '../config/upload.js';
+
+const RETRY_BASE_DELAY_MS = 250;
 
 export class GeminiAiProvider implements IAiProvider {
   private ai: GoogleGenAI;
 
   constructor() {
-    this.ai = new GoogleGenAI({});
+    this.ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
   }
 
-  private fileToGenerativePart(filePath: string) {
-    const ext = path.extname(filePath).toLowerCase();
-    
-    let mimeType = 'image/jpeg'; // Fallback seguro para imagens
-    if (ext === '.png') mimeType = 'image/png';
-    if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-    if (ext === '.pdf') mimeType = 'application/pdf';
+  private async generateContent(parameters: GenerateContentParameters): Promise<GenerateContentResponse> {
+    let lastError: unknown;
 
-    console.log(`[GeminiAI] Processando arquivo: ${filePath} com MimeType: ${mimeType}`);
+    for (let attempt = 0; attempt < env.GEMINI_MAX_ATTEMPTS; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), env.GEMINI_TIMEOUT_MS);
+
+      try {
+        return await this.ai.models.generateContent({
+          ...parameters,
+          config: {
+            ...parameters.config,
+            abortSignal: controller.signal,
+            httpOptions: {
+              ...parameters.config?.httpOptions,
+              timeout: env.GEMINI_TIMEOUT_MS,
+            },
+          },
+        });
+      } catch (error) {
+        lastError = error;
+        const timedOut = controller.signal.aborted || this.isTimeoutError(error);
+        const canRetry = timedOut || this.isTransientError(error);
+
+        if (!canRetry || attempt === env.GEMINI_MAX_ATTEMPTS - 1) {
+          throw this.toAppError(error, timedOut);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      await this.delay(RETRY_BASE_DELAY_MS * 2 ** attempt);
+    }
+
+    throw this.toAppError(lastError, this.isTimeoutError(lastError));
+  }
+
+  private delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+
+  private isTransientError(error: unknown): boolean {
+    const status = this.errorStatus(error);
+    if (status === 429 || (status !== null && status >= 500 && status <= 599)) return true;
+
+    if (!(error instanceof Error)) return false;
+    const retryableCodes = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH']);
+    const code = 'code' in error && typeof error.code === 'string' ? error.code : null;
+    return error.name === 'TypeError' || (code !== null && retryableCodes.has(code));
+  }
+
+  private isTimeoutError(error: unknown): boolean {
+    return error instanceof Error && (
+      error.name === 'AbortError' ||
+      error.name === 'TimeoutError' ||
+      error.name === 'APIConnectionTimeoutError'
+    );
+  }
+
+  private errorStatus(error: unknown): number | null {
+    return typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+      ? error.status
+      : null;
+  }
+
+  private toAppError(error: unknown, timedOut: boolean): AppError {
+    if (timedOut) return new AppError('O serviço de IA excedeu o tempo limite.', 504);
+    if (this.isTransientError(error)) return new AppError('O serviço de IA está temporariamente indisponível.', 503);
+    return new AppError('Falha ao comunicar com o serviço de IA.', 502);
+  }
+
+  private parseJson(text: string | undefined): unknown {
+    if (typeof text !== 'string' || text.trim() === '') {
+      throw new AppError('O serviço de IA retornou uma resposta vazia.', 422);
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new AppError('O serviço de IA retornou JSON inválido.', 422);
+    }
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private parseDanfeResponse(text: string | undefined): IDanfeExtractResult {
+    const parsed = this.parseJson(text);
+    if (
+      !this.isRecord(parsed) ||
+      typeof parsed.accessKey !== 'string' ||
+      typeof parsed.invoiceNumber !== 'string' ||
+      typeof parsed.series !== 'string' ||
+      (typeof parsed.issuedAt !== 'string' && !(parsed.issuedAt instanceof Date)) ||
+      typeof parsed.totalValue !== 'number' ||
+      !this.isRecord(parsed.supplier) ||
+      typeof parsed.supplier.cnpj !== 'string' ||
+      typeof parsed.supplier.name !== 'string' ||
+      !Array.isArray(parsed.products)
+    ) {
+      throw new AppError('O serviço de IA retornou dados incompatíveis com um DANFE.', 422);
+    }
+    return parsed as unknown as IDanfeExtractResult;
+  }
+
+  private parseSimilarityResponse(text: string | undefined): Record<string, unknown> {
+    const parsed = this.parseJson(text);
+    if (!this.isRecord(parsed) || typeof parsed.matchFound !== 'boolean') {
+      throw new AppError('O serviço de IA retornou uma similaridade inválida.', 422);
+    }
+    if (parsed.matchFound && (
+      typeof parsed.matchedProductId !== 'string' ||
+      typeof parsed.confidence !== 'number' ||
+      typeof parsed.reason !== 'string'
+    )) {
+      throw new AppError('O serviço de IA retornou uma similaridade inválida.', 422);
+    }
+    return parsed;
+  }
+
+  private async fileToGenerativePart(filePath: string, mimeType: DanfeMimeType) {
+    if (!isDanfeMimeType(mimeType)) {
+      throw new AppError('Tipo de arquivo não suportado.', 415);
+    }
+
+    const content = await fs.readFile(filePath);
 
     return {
       inlineData: {
-        data: Buffer.from(fs.readFileSync(filePath)).toString("base64"),
+        data: content.toString('base64'),
         mimeType
       },
     };
   }
 
-  async extractDanfeData(filePath: string): Promise<IDanfeExtractResult> {
+  async extractDanfeData(filePath: string, mimeType: DanfeMimeType): Promise<IDanfeExtractResult> {
     const responseSchema: Schema = {
       type: Type.OBJECT,
       properties: {
@@ -79,9 +200,9 @@ DIRETRIZES OBRIGATÓRIAS:
 
 Estruture o JSON final seguindo rigorosamente o esquema.`;
 
-    const filePart = this.fileToGenerativePart(filePath);
+    const filePart = await this.fileToGenerativePart(filePath, mimeType);
 
-    const response = await this.ai.models.generateContent({
+    const response = await this.generateContent({
       model: 'gemini-2.5-flash',
       contents: [basePrompt, filePart], 
       config: {
@@ -90,11 +211,7 @@ Estruture o JSON final seguindo rigorosamente o esquema.`;
       },
     });
 
-    if (!response.text) {
-      throw new AppError('Não foi possível extrair dados da nota fiscal fornecida.', 422);
-    }
-
-    return JSON.parse(response.text) as IDanfeExtractResult;
+    return this.parseDanfeResponse(response.text);
   }
 
   async findSimilarProduct(
@@ -129,7 +246,7 @@ Defina se a nova descrição refere-se fisicamente ao mesmo produto de algum ite
 Defina matchFound=true APENAS se a confiança for maior ou igual a 0.70.`;
 
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await this.generateContent({
         model: 'gemini-2.5-flash',
         contents: [prompt],
         config: {
@@ -138,11 +255,9 @@ Defina matchFound=true APENAS se a confiança for maior ou igual a 0.70.`;
         }
       });
 
-      if (!response.text) return null;
+      const parsed = this.parseSimilarityResponse(response.text);
 
-      const parsed = JSON.parse(response.text);
-
-      if (!parsed.matchFound || !parsed.matchedProductId || parsed.confidence < 0.7) {
+      if (!parsed.matchFound || typeof parsed.matchedProductId !== 'string' || typeof parsed.confidence !== 'number' || parsed.confidence < 0.7) {
         return null;
       }
 
@@ -155,10 +270,9 @@ Defina matchFound=true APENAS se a confiança for maior ou igual a 0.70.`;
       return {
         product: matchedProduct,
         confidence: parsed.confidence,
-        reason: parsed.reason,
+        reason: parsed.reason as string,
       };
-    } catch (error) {
-      console.error('[GeminiAI] Erro ao buscar produto similar:', error);
+    } catch {
       return null;
     }
   }

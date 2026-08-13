@@ -1,4 +1,5 @@
 import type { IProduct } from '../repositories/product.repository.js';
+import type { DanfeMimeType } from '../config/upload.js';
 
 export interface IProductItemResult {
   code: string;           // Código do produto (SKU / EAN)
@@ -32,7 +33,7 @@ export interface ISimilarityMatch {
 }
 
 export interface IAiProvider {
-  extractDanfeData(filePath: string): Promise<IDanfeExtractResult>;
+  extractDanfeData(filePath: string, mimeType: DanfeMimeType): Promise<IDanfeExtractResult>;
   findSimilarProduct(
     newItemDescription: string,
     existingProducts: IProduct[]

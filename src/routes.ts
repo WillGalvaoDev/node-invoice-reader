@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { ensureAuthenticated } from './middlewares/ensure-authenticated.js';
 import { uploadRateLimiter } from './middlewares/upload-rate-limiter.js';
-import multer from 'multer';
 import { RegisterUserController } from './controllers/register-user.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
 import { ReadInvoiceUseCase } from './use-cases/read-invoice/read-invoice.use-case.js';
@@ -29,10 +28,10 @@ import { CreateCompanyUseCase } from './use-cases/create-company/create-company.
 import { CreateCompanyController } from './controllers/create-company.controller.js';
 import { PrismaCompanyRepository } from './repositories/prisma-company.repository.js';
 import { PrismaStockRepository } from './repositories/prisma-stock.repository.js';
+import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoice-persistence.repository.js';
+import { invoiceUpload } from './middlewares/invoice-upload.js';
 
 export const routes = Router();
-
-const upload = multer({ dest: 'tmp/' });
 
 // Injeção - Compartilhados / Repositórios
 const storageProvider = new DiskStorageProvider();
@@ -41,6 +40,7 @@ const productRepository = new PrismaProductRepository();
 const auditLogRepository = new PrismaAuditLogRepository();
 const stockRepository = new PrismaStockRepository();
 const companyRepository = new PrismaCompanyRepository();
+const invoicePersistenceRepository = new PrismaInvoicePersistenceRepository();
 
 // Injeção - Notas Fiscais e Auditoria
 const readInvoiceUseCase = new ReadInvoiceUseCase(
@@ -48,10 +48,11 @@ const readInvoiceUseCase = new ReadInvoiceUseCase(
   aiProvider, 
   productRepository, 
   auditLogRepository,
-  stockRepository
+  stockRepository,
+  invoicePersistenceRepository
 );
 
-const uploadInvoiceController = new UploadInvoiceController(readInvoiceUseCase);
+const uploadInvoiceController = new UploadInvoiceController(readInvoiceUseCase, storageProvider);
 const listProductsUseCase = new ListProductsUseCase(productRepository);
 const listProductsController = new ListProductsController(listProductsUseCase);
 
@@ -81,24 +82,16 @@ routes.post(
   '/invoices/upload',
   ensureAuthenticated,  // 1º: Valida o token do usuário (se falhar, para aqui)
   uploadRateLimiter,    // 2º: Checa limite de requisições por usuário/IP (se exceder, para aqui)
-  upload.single('file'),// 3º: Só grava o arquivo em disk/tmp se passou na auth e no rate limit
+  invoiceUpload.single('file'),// 3º: Só grava o arquivo em disk/tmp se passou na auth e no rate limit
   uploadInvoiceController.handle.bind(uploadInvoiceController) // 4º: Processa a regra
 );
 
-routes.post('/users', (req, res) => {
-  registerUserController.handle(req, res);
-});
+routes.post('/users', registerUserController.handle.bind(registerUserController));
 
 // ROTA DE LOGIN
-routes.post('/login', (req, res) => {
-  loginController.handle(req, res);
-});
+routes.post('/login', loginController.handle.bind(loginController));
 
-routes.get('/products', ensureAuthenticated, (req, res) => {
-  listProductsController.handle(req, res);
-});
+routes.get('/products', ensureAuthenticated, listProductsController.handle.bind(listProductsController));
 
 // ROTA DE CRIAÇÃO DE EMPRESA
-routes.post('/companies', ensureAuthenticated, (req, res) => {
-  createCompanyController.handle(req, res);
-});
+routes.post('/companies', ensureAuthenticated, createCompanyController.handle.bind(createCompanyController));
