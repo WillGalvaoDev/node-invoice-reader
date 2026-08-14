@@ -669,9 +669,9 @@ Reescrever o teste de filtro por empresa com asserção real e corrigir o dublê
 
 ### M4-07 · Reavaliar `engineType = "binary"`
 
-**Status:** Concluída (validação local aprovada; validação remota em Linux pendente de CI).
+**Status:** Concluída em 2026-08-14.
 
-**Evidência de validação:** experimento A/B local (Windows) comparou a configuração legada (`engineType = "binary"`) com a padrão do Prisma 7 (sem override). O tempo de `prisma generate` reduziu de 182ms para 93ms. Validações locais aprovadas: `prisma validate`, `tsc --noEmit`, `build`, `verify:production`, suíte unitária completa (268/268) e PostgreSQL Integration Gate (26/26 sobre PostgreSQL 16 Alpine em Docker local no Windows). Decisão técnica: remover o override `engineType = "binary"` de `prisma/schema.prisma`. A validação final no ambiente-alvo Linux (`ubuntu-latest`) será confirmada na execução do pipeline de CI remoto após o commit do milestone.
+**Evidência de validação:** experimento A/B local (Windows) comparou a configuração legada (`engineType = "binary"`) com a padrão do Prisma 7 (sem override). O tempo de `prisma generate` reduziu de 182ms para 93ms. Validações locais aprovadas: `prisma validate`, `tsc --noEmit`, `build`, `verify:production`, suíte unitária completa (268/268) e PostgreSQL Integration Gate (26/26 sobre PostgreSQL 16 Alpine em Docker local no Windows). Validação remota em Linux (`ubuntu-latest`) confirmada pelo GitHub Actions no PR: `CI / production-runtime` PASS e `CI / verify` PASS. Decisão técnica: override `engineType = "binary"` removido de `prisma/schema.prisma` — configuração padrão do Prisma 7 com `@prisma/adapter-pg` funciona sem ressalvas em Windows e Linux.
 
 **Descrição**
 Testar a aplicação com o valor padrão do Prisma no ambiente-alvo, verificando se o problema de compatibilidade original ainda se manifesta. Manter o valor atual se reproduzir; documentar a razão de qualquer que seja a decisão.
@@ -687,7 +687,7 @@ Testar a aplicação com o valor padrão do Prisma no ambiente-alvo, verificando
 
 ---
 
-**Saída do Milestone 4:** portão de produção fechado. O sistema pode ser implantado, reiniciado sem perda, observado e alterado com regressão.
+**Saída do Milestone 4:** portão de produção fechado. O sistema pode ser implantado, reiniciado sem perda, observado e alterado com regressão. Milestone 4 concluído e validado em 2026-08-14 — todas as tarefas (M4-01 a M4-07) aprovadas, incluindo CI remoto em `ubuntu-latest` via GitHub Actions.
 
 ---
 
