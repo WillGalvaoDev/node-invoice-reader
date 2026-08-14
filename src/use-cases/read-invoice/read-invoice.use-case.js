@@ -5,6 +5,7 @@ import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.
 import { randomUUID } from 'node:crypto';
 import { parseCnpj } from '../../domain/cnpj.js';
 import { assertDanfeCoherence } from '../../domain/danfe-coherence.js';
+import { aiTelemetry, recordAiTelemetryBestEffort } from '../../infra/ai-telemetry.js';
 export class ReadInvoiceUseCase {
     storageProvider;
     aiProvider;
@@ -13,7 +14,8 @@ export class ReadInvoiceUseCase {
     stockRepository;
     invoicePersistenceRepository;
     applicationLogger;
-    constructor(storageProvider, aiProvider, productRepository, auditLogRepository, stockRepository, invoicePersistenceRepository, applicationLogger = logger) {
+    telemetry;
+    constructor(storageProvider, aiProvider, productRepository, auditLogRepository, stockRepository, invoicePersistenceRepository, applicationLogger = logger, telemetry = aiTelemetry) {
         this.storageProvider = storageProvider;
         this.aiProvider = aiProvider;
         this.productRepository = productRepository;
@@ -21,6 +23,7 @@ export class ReadInvoiceUseCase {
         this.stockRepository = stockRepository;
         this.invoicePersistenceRepository = invoicePersistenceRepository;
         this.applicationLogger = applicationLogger;
+        this.telemetry = telemetry;
     }
     sanitizeString(input) {
         return input
@@ -58,7 +61,9 @@ export class ReadInvoiceUseCase {
                 throw new AppError('Acesso não autorizado ao estoque informado.', 403);
             }
             // 1. Extrai os dados da nota fiscal via Gemini OCR
-            const rawExtractedData = await this.aiProvider.extractDanfeData(filePath, mimeType);
+            const rawExtractedData = requestId
+                ? await this.aiProvider.extractDanfeData(filePath, mimeType, { requestId })
+                : await this.aiProvider.extractDanfeData(filePath, mimeType);
             let supplierCnpj;
             try {
                 supplierCnpj = parseCnpj(rawExtractedData.supplier.cnpj);
@@ -111,7 +116,9 @@ export class ReadInvoiceUseCase {
                 }
                 const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
                 const similarityMatch = candidates.length > 0
-                    ? await this.aiProvider.findSimilarProduct(item.description, candidates)
+                    ? requestId
+                        ? await this.aiProvider.findSimilarProduct(item.description, candidates, { requestId })
+                        : await this.aiProvider.findSimilarProduct(item.description, candidates)
                     : null;
                 if (similarityMatch?.product.id) {
                     const suggestionId = randomUUID();
@@ -160,6 +167,9 @@ export class ReadInvoiceUseCase {
                 operations,
                 suggestions: suggestionOperations,
             }));
+            for (const suggestion of suggestions) {
+                recordAiTelemetryBestEffort(() => this.telemetry.recordSuggestion({ decision: 'created', confidence: suggestion.confidence }), this.applicationLogger, { event: 'ai_suggestion', decision: 'created', ...(requestId && { requestId }) });
+            }
             await persistAuditBestEffort({
                 repository: this.auditLogRepository,
                 logger: this.applicationLogger,

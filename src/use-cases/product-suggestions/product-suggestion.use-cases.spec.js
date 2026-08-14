@@ -14,6 +14,8 @@ describe('product suggestion lifecycle', () => {
         findById: vi.fn(), findPendingByStockId: vi.fn(), confirm: vi.fn(), reject: vi.fn(),
     };
     const stocks = { findByIdForUser: vi.fn() };
+    const telemetry = { recordCall: vi.fn(), recordSuggestion: vi.fn() };
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     beforeEach(() => {
         vi.clearAllMocks();
         repository.findById.mockResolvedValue(suggestion);
@@ -48,6 +50,29 @@ describe('product suggestion lifecycle', () => {
         const result = await new ListPendingProductSuggestionsUseCase(repository, stocks).execute({ stockId: 'stock-1', userId: 'user-1' });
         expect(repository.findPendingByStockId).toHaveBeenCalledWith('stock-1');
         expect(result).toEqual([suggestion]);
+    });
+    it.each([
+        ['confirmed', ConfirmProductSuggestionUseCase, 'confirm'],
+        ['rejected', RejectProductSuggestionUseCase, 'reject'],
+    ])('registra decisão %s somente após a transição persistida', async (decision, UseCase, repositoryMethod) => {
+        const result = await new UseCase(repository, stocks, telemetry, logger)
+            .execute({ suggestionId: suggestion.id, userId: 'user-1' });
+        expect(repository[repositoryMethod]).toHaveBeenCalledOnce();
+        expect(telemetry.recordSuggestion).toHaveBeenCalledWith({ decision, confidence: 0.88 });
+        expect(result.status).toBe(decision === 'confirmed' ? 'CONFIRMED' : 'REJECTED');
+    });
+    it('não registra decisão falha nem deixa falha da telemetria desfazer confirmação', async () => {
+        repository.confirm.mockRejectedValueOnce(new Error('transition failed'));
+        await expect(new ConfirmProductSuggestionUseCase(repository, stocks, telemetry, logger)
+            .execute({ suggestionId: suggestion.id, userId: 'user-1' })).rejects.toThrow('transition failed');
+        expect(telemetry.recordSuggestion).not.toHaveBeenCalled();
+        repository.confirm.mockResolvedValueOnce({ ...suggestion, status: 'CONFIRMED' });
+        telemetry.recordSuggestion.mockImplementationOnce(() => { throw new Error('telemetry unavailable'); });
+        await expect(new ConfirmProductSuggestionUseCase(repository, stocks, telemetry, logger)
+            .execute({ suggestionId: suggestion.id, userId: 'user-1' })).resolves.toMatchObject({ status: 'CONFIRMED' });
+        expect(logger.warn).toHaveBeenCalledWith('AI telemetry recording failed', expect.objectContaining({
+            event: 'ai_suggestion', decision: 'confirmed', error: { name: 'Error' },
+        }));
     });
 });
 //# sourceMappingURL=product-suggestion.use-cases.spec.js.map

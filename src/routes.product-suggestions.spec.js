@@ -29,7 +29,7 @@ vi.mock('./controllers/upload-invoice.controller.js', () => ({ UploadInvoiceCont
         handle = vi.fn();
     } }));
 vi.mock('./middlewares/ensure-authenticated.js', () => ({
-    ensureAuthenticated: (request, _response, next) => {
+    createEnsureAuthenticated: () => (request, _response, next) => {
         request.user = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
         next();
     },

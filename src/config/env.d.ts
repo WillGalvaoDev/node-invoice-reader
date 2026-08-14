@@ -9,6 +9,8 @@ export declare function createEnv(environment: Environment): {
     GEMINI_MAX_ATTEMPTS: number;
     TRUST_PROXY_HOPS: number;
     CORS_ALLOWED_ORIGINS: string[];
+    REQUEST_TIMEOUT_MS: number;
+    SHUTDOWN_TIMEOUT_MS: number;
 };
 export declare const env: {
     DATABASE_URL: string;
@@ -19,6 +21,8 @@ export declare const env: {
     GEMINI_MAX_ATTEMPTS: number;
     TRUST_PROXY_HOPS: number;
     CORS_ALLOWED_ORIGINS: string[];
+    REQUEST_TIMEOUT_MS: number;
+    SHUTDOWN_TIMEOUT_MS: number;
 };
 export {};
 //# sourceMappingURL=env.d.ts.map

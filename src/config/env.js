@@ -55,6 +55,8 @@ export function createEnv(environment) {
         GEMINI_MAX_ATTEMPTS: parseIntegerInRange(environment.GEMINI_MAX_ATTEMPTS, 2, 'GEMINI_MAX_ATTEMPTS', 1, 2),
         TRUST_PROXY_HOPS: parseIntegerInRange(environment.TRUST_PROXY_HOPS, 0, 'TRUST_PROXY_HOPS', 0, 10),
         CORS_ALLOWED_ORIGINS: parseCorsAllowedOrigins(environment.CORS_ALLOWED_ORIGINS),
+        REQUEST_TIMEOUT_MS: parseIntegerInRange(environment.REQUEST_TIMEOUT_MS, 120_000, 'REQUEST_TIMEOUT_MS', 30_000, 300_000),
+        SHUTDOWN_TIMEOUT_MS: parseIntegerInRange(environment.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 1_000, 120_000),
     };
 }
 export const env = createEnv(process.env);

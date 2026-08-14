@@ -1,26 +1,46 @@
-import express from 'express';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { routes } from './routes.js';
-import { errorHandler } from './middlewares/error-handler.js';
 import { env } from './config/env.js';
-import { configureTrustProxy } from './config/trust-proxy.js';
-import { requestIdMiddleware } from './middlewares/request-id.js';
 import { logger } from './infra/logger.js';
-import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
+import { disconnectPrisma } from './infra/prisma.js';
+import { checkDatabaseHealth } from './infra/health.js';
+import { createApp, createOperationalState } from './app.js';
+import { createHttpServer, createServerLifecycle, installProcessHandlers } from './server-lifecycle.js';
 
-const app = express();
+export function startApplication() {
+  const operationalState = createOperationalState();
+  const app = createApp({
+    applicationRoutes: routes,
+    healthProbe: checkDatabaseHealth,
+    operationalState,
+    logger,
+    trustProxyHops: env.TRUST_PROXY_HOPS,
+    allowedOrigins: env.CORS_ALLOWED_ORIGINS,
+  });
+  const server = createHttpServer(app, env.REQUEST_TIMEOUT_MS);
+  const lifecycle = createServerLifecycle({
+    server,
+    operationalState,
+    closeDatabase: disconnectPrisma,
+    logger,
+    shutdownTimeoutMs: env.SHUTDOWN_TIMEOUT_MS,
+    exit: (code) => process.exit(code),
+  });
+  const uninstallProcessHandlers = installProcessHandlers({
+    processEvents: process,
+    shutdown: lifecycle.shutdown,
+    logger,
+  });
 
-configureTrustProxy(app, env.TRUST_PROXY_HOPS);
-app.use(requestIdMiddleware);
+  server.listen(env.PORT, () => {
+    logger.info('HTTP server started', { port: env.PORT });
+  });
 
-app.use(...createHttpSecurityMiddlewares(env.CORS_ALLOWED_ORIGINS));
+  return { app, server, lifecycle, uninstallProcessHandlers };
+}
 
-// Middleware para decodificar JSON no corpo das requisições
-app.use(express.json());
-
-// Acopla as nossas rotas estruturadas (Multer, Rotas e Controllers)
-app.use(routes);
-app.use(errorHandler);
-
-app.listen(env.PORT, () => {
-  logger.info('HTTP server started', { port: env.PORT });
-});
+const invokedPath = process.argv[1];
+if (invokedPath && import.meta.url === pathToFileURL(resolve(invokedPath)).href) {
+  startApplication();
+}

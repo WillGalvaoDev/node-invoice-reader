@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { ensureAuthenticated } from './middlewares/ensure-authenticated.js';
+import { createEnsureAuthenticated } from './middlewares/ensure-authenticated.js';
 import { uploadRateLimiter } from './middlewares/upload-rate-limiter.js';
 import { RegisterUserController } from './controllers/register-user.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
@@ -33,7 +33,19 @@ import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions
 import { RejectProductSuggestionUseCase } from './use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListPendingProductSuggestionsUseCase } from './use-cases/product-suggestions/list-pending-product-suggestions.use-case.js';
 import { ConfirmProductSuggestionController, RejectProductSuggestionController, ListPendingProductSuggestionsController, } from './controllers/product-suggestion.controllers.js';
-export const routes = Router();
+export function createRoutes(options) {
+    const router = Router();
+    const { controllers } = options;
+    router.post('/invoices/upload', options.authenticate, options.uploadRateLimiter, options.invoiceUpload, controllers.uploadInvoice.handle.bind(controllers.uploadInvoice));
+    router.post('/users', options.userRegistrationRateLimiter, validateBody(registerUserBodySchema), controllers.registerUser.handle.bind(controllers.registerUser));
+    router.post('/login', options.loginRateLimiter, validateBody(loginBodySchema), controllers.login.handle.bind(controllers.login));
+    router.get('/products', options.authenticate, validateQuery(listProductsQuerySchema), controllers.listProducts.handle.bind(controllers.listProducts));
+    router.post('/companies', options.authenticate, validateBody(createCompanyBodySchema), controllers.createCompany.handle.bind(controllers.createCompany));
+    router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
+    router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
+    router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
+    return router;
+}
 // Injeção - Compartilhados / Repositórios
 const storageProvider = new DiskStorageProvider();
 const aiProvider = new GeminiAiProvider();
@@ -56,6 +68,7 @@ const registerUserUseCase = new RegisterUserUseCase(userRepository, hashProvider
 const registerUserController = new RegisterUserController(registerUserUseCase);
 // INJEÇÃO - LOGIN
 const tokenProvider = new JoseTokenProvider();
+const ensureAuthenticated = createEnsureAuthenticated({ tokenProvider, userRepository });
 const loginUseCase = new LoginUseCase(userRepository, hashProvider, tokenProvider);
 const loginController = new LoginController(loginUseCase);
 // INJEÇÃO - EMPRESA
@@ -64,19 +77,21 @@ const createCompanyController = new CreateCompanyController(createCompanyUseCase
 const confirmSuggestionController = new ConfirmProductSuggestionController(new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository));
 const rejectSuggestionController = new RejectProductSuggestionController(new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository));
 const listSuggestionsController = new ListPendingProductSuggestionsController(new ListPendingProductSuggestionsUseCase(productSuggestionRepository, stockRepository));
-// ROTAS
-routes.post('/invoices/upload', ensureAuthenticated, // 1º: Valida o token do usuário (se falhar, para aqui)
-uploadRateLimiter, // 2º: Checa limite de requisições por usuário/IP (se exceder, para aqui)
-invoiceUpload.single('file'), // 3º: Só grava o arquivo em disk/tmp se passou na auth e no rate limit
-uploadInvoiceController.handle.bind(uploadInvoiceController) // 4º: Processa a regra
-);
-routes.post('/users', userRegistrationRateLimiter, validateBody(registerUserBodySchema), registerUserController.handle.bind(registerUserController));
-// ROTA DE LOGIN
-routes.post('/login', loginRateLimiter, validateBody(loginBodySchema), loginController.handle.bind(loginController));
-routes.get('/products', ensureAuthenticated, validateQuery(listProductsQuerySchema), listProductsController.handle.bind(listProductsController));
-// ROTA DE CRIAÇÃO DE EMPRESA
-routes.post('/companies', ensureAuthenticated, validateBody(createCompanyBodySchema), createCompanyController.handle.bind(createCompanyController));
-routes.get('/stocks/:stockId/suggestions', ensureAuthenticated, validateParams(stockSuggestionParamsSchema), listSuggestionsController.handle.bind(listSuggestionsController));
-routes.post('/suggestions/:suggestionId/confirm', ensureAuthenticated, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), confirmSuggestionController.handle.bind(confirmSuggestionController));
-routes.post('/suggestions/:suggestionId/reject', ensureAuthenticated, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), rejectSuggestionController.handle.bind(rejectSuggestionController));
+export const routes = createRoutes({
+    authenticate: ensureAuthenticated,
+    uploadRateLimiter,
+    loginRateLimiter,
+    userRegistrationRateLimiter,
+    invoiceUpload: invoiceUpload.single('file'),
+    controllers: {
+        registerUser: registerUserController,
+        login: loginController,
+        createCompany: createCompanyController,
+        listProducts: listProductsController,
+        uploadInvoice: uploadInvoiceController,
+        confirmSuggestion: confirmSuggestionController,
+        rejectSuggestion: rejectSuggestionController,
+        listSuggestions: listSuggestionsController,
+    },
+});
 //# sourceMappingURL=routes.js.map

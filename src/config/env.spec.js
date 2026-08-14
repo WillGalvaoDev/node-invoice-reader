@@ -32,7 +32,23 @@ describe('configuração da aplicação', () => {
             GEMINI_MAX_ATTEMPTS: 2,
             TRUST_PROXY_HOPS: 0,
             CORS_ALLOWED_ORIGINS: [],
+            REQUEST_TIMEOUT_MS: 120_000,
+            SHUTDOWN_TIMEOUT_MS: 30_000,
         });
+    });
+    it('valida os limites operacionais de request e shutdown', async () => {
+        const { createEnv } = await import('./env.js');
+        const required = {
+            DATABASE_URL: 'postgresql://localhost/docscan',
+            JWT_SECRET: 'jwt-secret',
+            GEMINI_API_KEY: 'gemini-key',
+        };
+        expect(createEnv({ ...required, REQUEST_TIMEOUT_MS: '90000', SHUTDOWN_TIMEOUT_MS: '15000' }))
+            .toEqual(expect.objectContaining({ REQUEST_TIMEOUT_MS: 90_000, SHUTDOWN_TIMEOUT_MS: 15_000 }));
+        expect(() => createEnv({ ...required, REQUEST_TIMEOUT_MS: '29999' })).toThrow('REQUEST_TIMEOUT_MS');
+        expect(() => createEnv({ ...required, REQUEST_TIMEOUT_MS: '300001' })).toThrow('REQUEST_TIMEOUT_MS');
+        expect(() => createEnv({ ...required, SHUTDOWN_TIMEOUT_MS: '999' })).toThrow('SHUTDOWN_TIMEOUT_MS');
+        expect(() => createEnv({ ...required, SHUTDOWN_TIMEOUT_MS: '120001' })).toThrow('SHUTDOWN_TIMEOUT_MS');
     });
     it('usa a porta 3333 por padrão e rejeita portas inválidas', async () => {
         const { createEnv } = await import('./env.js');

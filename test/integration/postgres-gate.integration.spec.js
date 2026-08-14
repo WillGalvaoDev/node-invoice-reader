@@ -10,6 +10,9 @@ import { PrismaProductSuggestionRepository } from '../../src/repositories/prisma
 import { ConfirmProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListProductsUseCase } from '../../src/use-cases/list-products/list-products.use-case.js';
+import express from 'express';
+import { createApp } from '../../src/app.js';
+import { checkDatabaseHealth } from '../../src/infra/health.js';
 const persistence = new PrismaInvoicePersistenceRepository();
 const suggestionRepository = new PrismaProductSuggestionRepository();
 const productRepository = new PrismaProductRepository();
@@ -71,6 +74,23 @@ function plan(stockId, accessKey, products) {
 beforeEach(cleanDatabase);
 afterAll(disconnectPrisma);
 describe('PostgreSQL Integration Gate', () => {
+    it('expõe health público baseado em SELECT 1 real no PostgreSQL', async () => {
+        const app = createApp({ applicationRoutes: express.Router(), healthProbe: checkDatabaseHealth });
+        const server = await new Promise((resolve, reject) => {
+            const candidate = app.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve(candidate));
+        });
+        try {
+            const address = server.address();
+            if (!address || typeof address === 'string')
+                throw new Error('Endereço inválido');
+            const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ status: 'ok' });
+        }
+        finally {
+            await new Promise((resolve) => server.close(() => resolve()));
+        }
+    });
     it('usa identidade composta e traduz P2002/P2003 reais sem perder integridade', async () => {
         const { company, stock: stockA } = await seedOwnerAndStock();
         const stockB = await prisma.stock.create({ data: { name: 'Estoque B', companyId: company.id } });

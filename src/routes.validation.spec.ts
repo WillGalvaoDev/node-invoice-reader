@@ -17,7 +17,7 @@ vi.mock('./controllers/create-company.controller.js', () => ({ CreateCompanyCont
 vi.mock('./controllers/list-products.controller.js', () => ({ ListProductsController: class { handle = handles.listProducts; } }));
 vi.mock('./controllers/upload-invoice.controller.js', () => ({ UploadInvoiceController: class { handle = vi.fn(); } }));
 vi.mock('./middlewares/ensure-authenticated.js', () => ({
-  ensureAuthenticated: (request: Request, _response: Response, next: () => void) => {
+  createEnsureAuthenticated: () => (request: Request, _response: Response, next: () => void) => {
     request.user = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
     next();
   },

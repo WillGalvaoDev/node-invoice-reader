@@ -1,9 +1,13 @@
 import type { IProductSuggestionRepository } from '../../repositories/product-suggestion.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
+import { type IAiTelemetry } from '../../infra/ai-telemetry.js';
+import { type Logger } from '../../infra/logger.js';
 export declare class RejectProductSuggestionUseCase {
     private suggestions;
     private stocks;
-    constructor(suggestions: IProductSuggestionRepository, stocks: Pick<IStockRepository, 'findByIdForUser'>);
+    private telemetry;
+    private applicationLogger;
+    constructor(suggestions: IProductSuggestionRepository, stocks: Pick<IStockRepository, 'findByIdForUser'>, telemetry?: IAiTelemetry, applicationLogger?: Logger);
     execute({ suggestionId, userId }: {
         suggestionId: string;
         userId: string;

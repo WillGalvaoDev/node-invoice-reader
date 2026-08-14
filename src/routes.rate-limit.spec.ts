@@ -14,7 +14,7 @@ vi.mock('./controllers/register-user.controller.js', () => ({ RegisterUserContro
 vi.mock('./controllers/create-company.controller.js', () => ({ CreateCompanyController: class { handle = vi.fn(); } }));
 vi.mock('./controllers/list-products.controller.js', () => ({ ListProductsController: class { handle = vi.fn(); } }));
 vi.mock('./controllers/upload-invoice.controller.js', () => ({ UploadInvoiceController: class { handle = vi.fn(); } }));
-vi.mock('./middlewares/ensure-authenticated.js', () => ({ ensureAuthenticated: (_req: unknown, _res: unknown, next: () => void) => next() }));
+vi.mock('./middlewares/ensure-authenticated.js', () => ({ createEnsureAuthenticated: () => (_req: unknown, _res: unknown, next: () => void) => next() }));
 vi.mock('./middlewares/upload-rate-limiter.js', () => ({ uploadRateLimiter: (_req: unknown, _res: unknown, next: () => void) => next() }));
 vi.mock('./config/env.js', () => ({
   env: {

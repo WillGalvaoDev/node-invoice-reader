@@ -6,6 +6,7 @@ import type { IStockRepository } from '../../repositories/stock.repository.js';
 import type { IInvoicePersistenceRepository } from '../../repositories/invoice-persistence.repository.js';
 import type { DanfeMimeType } from '../../config/upload.js';
 import { type Logger } from '../../infra/logger.js';
+import { type IAiTelemetry } from '../../infra/ai-telemetry.js';
 interface IReadInvoiceRequest {
     filePath: string;
     mimeType: DanfeMimeType;
@@ -34,7 +35,8 @@ export declare class ReadInvoiceUseCase {
     private readonly stockRepository;
     private readonly invoicePersistenceRepository;
     private readonly applicationLogger;
-    constructor(storageProvider: IStorageProvider, aiProvider: IAiProvider, productRepository: IProductRepository, auditLogRepository: IAuditLogRepository, stockRepository: IStockRepository, invoicePersistenceRepository: IInvoicePersistenceRepository, applicationLogger?: Logger);
+    private readonly telemetry;
+    constructor(storageProvider: IStorageProvider, aiProvider: IAiProvider, productRepository: IProductRepository, auditLogRepository: IAuditLogRepository, stockRepository: IStockRepository, invoicePersistenceRepository: IInvoicePersistenceRepository, applicationLogger?: Logger, telemetry?: IAiTelemetry);
     private sanitizeString;
     private productAuditState;
     execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse>;

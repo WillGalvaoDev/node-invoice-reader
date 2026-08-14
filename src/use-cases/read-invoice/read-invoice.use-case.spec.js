@@ -8,6 +8,7 @@ describe('ReadInvoiceUseCase', () => {
     let stockRepositoryMock;
     let invoicePersistenceMock;
     let loggerMock;
+    let telemetryMock;
     let sut;
     const mockAiResult = {
         accessKey: '35260700000000000000550010000000011000000001',
@@ -82,7 +83,8 @@ describe('ReadInvoiceUseCase', () => {
         loggerMock = {
             debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
         };
-        sut = new ReadInvoiceUseCase(storageProviderMock, aiProviderMock, productRepositoryMock, auditLogRepositoryMock, stockRepositoryMock, invoicePersistenceMock, loggerMock);
+        telemetryMock = { recordCall: vi.fn(), recordSuggestion: vi.fn() };
+        sut = new ReadInvoiceUseCase(storageProviderMock, aiProviderMock, productRepositoryMock, auditLogRepositoryMock, stockRepositoryMock, invoicePersistenceMock, loggerMock, telemetryMock);
     });
     it('deve cadastrar novos produtos no estoque quando não existirem nem por código nem por similaridade', async () => {
         const filePath = '/path/to/any/nota.png';
@@ -240,6 +242,22 @@ describe('ReadInvoiceUseCase', () => {
                 confidence: 0.88,
             }),
         ]);
+        expect(telemetryMock.recordSuggestion).toHaveBeenCalledWith({ decision: 'created', confidence: 0.88 });
+    });
+    it('mantém invoice commitada quando telemetria da suggestion falha', async () => {
+        const similarProduct = {
+            id: 'similar-id', code: 'PAR-001', description: 'PARAFUSO SEXTAVADO', quantity: 10,
+            unitMeasurement: 'UN', unitPrice: 2, totalPrice: 20, stockId: 'stock-1', userId: 'user-1',
+        };
+        productRepositoryMock.findByStockId.mockResolvedValue([similarProduct]);
+        aiProviderMock.findSimilarProduct.mockResolvedValue({ product: similarProduct, confidence: 0.88, reason: 'similar' });
+        telemetryMock.recordSuggestion.mockImplementationOnce(() => { throw new Error('telemetry unavailable'); });
+        const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1' });
+        expect(result.suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ confidence: 0.88 })]));
+        expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
+        expect(loggerMock.warn).toHaveBeenCalledWith('AI telemetry recording failed', expect.objectContaining({
+            event: 'ai_suggestion', decision: 'created', error: { name: 'Error' },
+        }));
     });
     it('deve lançar AppError e deletar o arquivo temporário quando a IA retornar uma estrutura inválida ou sem produtos', async () => {
         const invalidAiResult = {

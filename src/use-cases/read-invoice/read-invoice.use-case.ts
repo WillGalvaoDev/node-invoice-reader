@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import type { IInvoiceSuggestionOperation } from '../../repositories/invoice-persistence.repository.js';
 import { parseCnpj } from '../../domain/cnpj.js';
 import { assertDanfeCoherence } from '../../domain/danfe-coherence.js';
+import { aiTelemetry, recordAiTelemetryBestEffort, type IAiTelemetry } from '../../infra/ai-telemetry.js';
 
 interface IReadInvoiceRequest {
   filePath: string;
@@ -46,6 +47,7 @@ export class ReadInvoiceUseCase {
     private readonly stockRepository: IStockRepository,
     private readonly invoicePersistenceRepository: IInvoicePersistenceRepository,
     private readonly applicationLogger: Logger = logger,
+    private readonly telemetry: IAiTelemetry = aiTelemetry,
   ) {}
 
   private sanitizeString(input: string): string {
@@ -89,7 +91,9 @@ export class ReadInvoiceUseCase {
       }
 
       // 1. Extrai os dados da nota fiscal via Gemini OCR
-      const rawExtractedData = await this.aiProvider.extractDanfeData(filePath, mimeType);
+      const rawExtractedData = requestId
+        ? await this.aiProvider.extractDanfeData(filePath, mimeType, { requestId })
+        : await this.aiProvider.extractDanfeData(filePath, mimeType);
 
       let supplierCnpj: string;
       try {
@@ -157,7 +161,9 @@ export class ReadInvoiceUseCase {
 
         const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
         const similarityMatch: ISimilarityMatch | null = candidates.length > 0
-          ? await this.aiProvider.findSimilarProduct(item.description, candidates)
+          ? requestId
+            ? await this.aiProvider.findSimilarProduct(item.description, candidates, { requestId })
+            : await this.aiProvider.findSimilarProduct(item.description, candidates)
           : null;
 
         if (similarityMatch?.product.id) {
@@ -209,6 +215,14 @@ export class ReadInvoiceUseCase {
         operations,
         suggestions: suggestionOperations,
       }));
+
+      for (const suggestion of suggestions) {
+        recordAiTelemetryBestEffort(
+          () => this.telemetry.recordSuggestion({ decision: 'created', confidence: suggestion.confidence }),
+          this.applicationLogger,
+          { event: 'ai_suggestion', decision: 'created', ...(requestId && { requestId }) },
+        );
+      }
 
       await persistAuditBestEffort({
         repository: this.auditLogRepository,

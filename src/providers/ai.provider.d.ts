@@ -28,7 +28,11 @@ export interface ISimilarityMatch {
     reason: string;
 }
 export interface IAiProvider {
-    extractDanfeData(filePath: string, mimeType: DanfeMimeType): Promise<IDanfeExtractResult>;
-    findSimilarProduct(newItemDescription: string, existingProducts: IProduct[]): Promise<ISimilarityMatch | null>;
+    extractDanfeData(filePath: string, mimeType: DanfeMimeType, context?: {
+        requestId?: string;
+    }): Promise<IDanfeExtractResult>;
+    findSimilarProduct(newItemDescription: string, existingProducts: IProduct[], context?: {
+        requestId?: string;
+    }): Promise<ISimilarityMatch | null>;
 }
 //# sourceMappingURL=ai.provider.d.ts.map

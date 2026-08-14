@@ -9,7 +9,7 @@ vi.mock('./controllers/upload-invoice.controller.js', () => ({
     },
 }));
 vi.mock('./middlewares/ensure-authenticated.js', () => ({
-    ensureAuthenticated: (_request, _response, next) => next(),
+    createEnsureAuthenticated: () => (_request, _response, next) => next(),
 }));
 vi.mock('./middlewares/upload-rate-limiter.js', () => ({
     uploadRateLimiter: (_request, _response, next) => next(),

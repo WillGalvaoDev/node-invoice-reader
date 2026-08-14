@@ -33,9 +33,10 @@ export interface ISimilarityMatch {
 }
 
 export interface IAiProvider {
-  extractDanfeData(filePath: string, mimeType: DanfeMimeType): Promise<IDanfeExtractResult>;
+  extractDanfeData(filePath: string, mimeType: DanfeMimeType, context?: { requestId?: string }): Promise<IDanfeExtractResult>;
   findSimilarProduct(
     newItemDescription: string,
-    existingProducts: IProduct[]
+    existingProducts: IProduct[],
+    context?: { requestId?: string },
   ): Promise<ISimilarityMatch | null>;
 }

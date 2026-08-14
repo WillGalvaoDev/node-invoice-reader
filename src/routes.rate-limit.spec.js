@@ -21,7 +21,7 @@ vi.mock('./controllers/list-products.controller.js', () => ({ ListProductsContro
 vi.mock('./controllers/upload-invoice.controller.js', () => ({ UploadInvoiceController: class {
         handle = vi.fn();
     } }));
-vi.mock('./middlewares/ensure-authenticated.js', () => ({ ensureAuthenticated: (_req, _res, next) => next() }));
+vi.mock('./middlewares/ensure-authenticated.js', () => ({ createEnsureAuthenticated: () => (_req, _res, next) => next() }));
 vi.mock('./middlewares/upload-rate-limiter.js', () => ({ uploadRateLimiter: (_req, _res, next) => next() }));
 vi.mock('./config/env.js', () => ({
     env: {

@@ -549,6 +549,10 @@ Usar a chave composta no lookup por código e mapear `P2002`/`P2003` para `AppEr
 
 ### M4-01 · Prontidão operacional do processo
 
+**Status:** Concluída em 2026-08-13.
+
+**Evidência de validação:** construção do Express, criação/configuração do `http.Server` e lifecycle do processo foram separados em módulos testáveis, sem side effect no import do entrypoint. `SIGTERM`/`SIGINT` tornam readiness indisponível, chamam `server.close()`, drenam requests aceitas, fecham Prisma/pool somente depois e saem com 0; o shutdown é idempotente e possui deadline configurável de 30 s, após o qual `closeAllConnections()` força conexões restantes e o exit é 1. `unhandledRejection` e `uncaughtException` são registrados com contexto mínimo seguro e acionam o mesmo shutdown fatal. `GET /health` é público, responde somente `{ status }`, executa `SELECT 1` real e retorna 503 para banco indisponível ou shutdown. O servidor aplica `requestTimeout` e timeout de socket explícitos de 120 s, compatíveis com upload e duas tentativas Gemini de até 30 s. RED: módulos/health/config ausentes e 4 falhas de coleta/comportamento; testes focados: 32/32, incluindo servidor real e barreira de request; suíte completa: 226/226; PostgreSQL efêmero com 8 migrations: 26/26; typecheck, build, Prisma validate e `git diff --check` aprovados. Nenhuma migration ou dependência foi necessária.
+
 **Descrição**
 Graceful shutdown (drenar requisições, encerrar o pool de M1-02), endpoint de healthcheck que verifique dependências reais, handlers de `unhandledRejection`/`uncaughtException` com log antes de encerrar, e timeout de requisição.
 *Itens de origem: seção 3 e 7 (prontidão operacional)*
@@ -564,6 +568,10 @@ Graceful shutdown (drenar requisições, encerrar o pool de M1-02), endpoint de 
 ---
 
 ### M4-02 · Testes de rota e de middleware de autenticação
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** middleware convertido em factory com verifier e repositório injetados; testes cobrem token ausente/malformado/expirado, assinatura inválida, usuário removido e identidade confiável. Todas as 9 rotas HTTP possuem cobertura real pelo Express com use cases mockados, incluindo validação, upload, paginação, suggestions, error handler, request ID e health. Testes focados: 48/48; suíte completa: 244/244; build, Prisma validate e `git diff --check` aprovados.
 
 **Descrição**
 Cobrir as rotas via HTTP com use cases mockados, e o middleware de autenticação em seus cenários de falha (token ausente, malformado, expirado, assinatura inválida, usuário removido após emissão). Inclui converter o middleware em factory que recebe dependências — hoje ele constrói as próprias, o que o torna intestável e é o único ponto do sistema fora do padrão de injeção.
@@ -581,6 +589,10 @@ Cobrir as rotas via HTTP com use cases mockados, e o middleware de autenticaçã
 
 ### M4-03 · Testes de integração com Postgres real
 
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** gap analysis confirmou que o gate PostgreSQL acumulado já cobre integralmente o escopo original: P2002 e unicidade composta `(stockId, code)`, rollback no meio do lote sem estado parcial, incrementos concorrentes sem lost update e com custo médio correto, P2003 real com integridade preservada e idempotência concorrente por `accessKey` com aplicação única. Nenhuma duplicação de teste ou alteração de produção foi necessária. O gate passou duas vezes de forma independente, cada execução criando PostgreSQL 16 efêmero, aplicando as 8 migrations sobre banco vazio, validando o schema, executando 26/26 testes e removendo container, rede e volumes no teardown.
+
 **Descrição**
 Suíte contra banco real cobrindo o que os dublês não representam: constraints de unicidade, rollback de transação no meio do lote, incremento atômico sob concorrência, comportamento de FK inválida e idempotência por chave de acesso.
 *Itens de origem: 9.2 (complemento)*
@@ -596,6 +608,10 @@ Suíte contra banco real cobrindo o que os dublês não representam: constraints
 ---
 
 ### M4-04 · Observabilidade do pipeline de IA
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** telemetria estruturada tipada registra, por operação de extração e similarity, modelo/versão, duração monotônica, tentativas, usage metadata real do Gemini, custo determinístico em nanos de USD e categoria fechada de falha. Sugestões registram criação/confirm/reject pós-commit com buckets estáveis de confidence; falhas do recorder/logger permanecem best-effort. Pricing do `gemini-2.5-flash` foi centralizado com fonte oficial versionada. Testes focados cobrem usage ausente, retries recuperados/esgotados, custo, buckets, decisões sem duplicação e falhas de telemetria; suíte completa 268/268, gate PostgreSQL 26/26 com 8 migrations, build e Prisma validate aprovados.
 
 **Descrição**
 Instrumentar latência, tokens, custo, taxa de falha, distribuição de confiança e taxa de aceitação/rejeição das sugestões de M3-02.
@@ -613,6 +629,10 @@ Instrumentar latência, tokens, custo, taxa de falha, distribuição de confian�
 
 ### M4-05 · Pipeline de CI e artefatos de implantação
 
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** workflow GitHub Actions em Node 24 LTS executa instalação determinística, `prisma validate`, geração explícita do Prisma Client, `tsc --noEmit`, suíte completa e PostgreSQL Integration Gate. Job independente simula build multi-stage: compila com ferramentas de desenvolvimento, executa `npm prune --omit=dev` e carrega o grafo runtime compilado. A sequência equivalente passou em cópia temporária isolada; suíte 268/268, gate PostgreSQL 26/26 com 8 migrations e build aprovados. `.env.example` cobre as 10 variáveis do config central sem secrets reais.
+
 **Descrição**
 CI executando `tsc --noEmit`, a suíte de testes e validação do schema. `.env.example` documentando as variáveis de M1-03. Build de produção verificado **com apenas dependências de produção instaladas**.
 *Itens de origem: prontidão operacional*
@@ -629,6 +649,10 @@ CI executando `tsc --noEmit`, a suíte de testes e validação do schema. `.env.
 
 ### M4-06 · Corrigir o teste que não assere nada e o dublê defeituoso
 
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** a análise de lacunas (gap analysis) confirmou que a reestruturação promovida pela M3-05 absorveu integralmente o finding 9.1. O contrato de leitura de produtos foi alinhado ao escopo de estoque (`stockId`), o método `findByCompanyId` foi removido de `IProductRepository`, `PrismaProductRepository` e `InMemoryProductRepository`, e o teste defeituoso (`"filtrar produtos por empresa (companyId)"`) que usava asserções inócuas (`toBeDefined()` e `Array.isArray()`) foi substituído por uma suíte robusta baseada em `findPageByStockId` com validação de escopo de estoque, autorização de visualizador, tolerância a criador nulo e paginação por cursor sem vazamento entre estoques. O dublê `InMemoryProductRepository` e a implementação Prisma trabalham de forma equivalente por `stockId`. Suíte completa 268/268, typecheck, build e `prisma validate` aprovados.
+
 **Descrição**
 Reescrever o teste de filtro por empresa com asserção real e corrigir o dublê in-memory, que hoje ignora o parâmetro que dá nome ao teste.
 *Itens de origem: 9.1*
@@ -644,6 +668,10 @@ Reescrever o teste de filtro por empresa com asserção real e corrigir o dublê
 ---
 
 ### M4-07 · Reavaliar `engineType = "binary"`
+
+**Status:** Concluída (validação local aprovada; validação remota em Linux pendente de CI).
+
+**Evidência de validação:** experimento A/B local (Windows) comparou a configuração legada (`engineType = "binary"`) com a padrão do Prisma 7 (sem override). O tempo de `prisma generate` reduziu de 182ms para 93ms. Validações locais aprovadas: `prisma validate`, `tsc --noEmit`, `build`, `verify:production`, suíte unitária completa (268/268) e PostgreSQL Integration Gate (26/26 sobre PostgreSQL 16 Alpine em Docker local no Windows). Decisão técnica: remover o override `engineType = "binary"` de `prisma/schema.prisma`. A validação final no ambiente-alvo Linux (`ubuntu-latest`) será confirmada na execução do pipeline de CI remoto após o commit do milestone.
 
 **Descrição**
 Testar a aplicação com o valor padrão do Prisma no ambiente-alvo, verificando se o problema de compatibilidade original ainda se manifesta. Manter o valor atual se reproduzir; documentar a razão de qualquer que seja a decisão.
