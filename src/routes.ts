@@ -1,7 +1,6 @@
-import { Router } from 'express';
-import { ensureAuthenticated } from './middlewares/ensure-authenticated.js';
+import { Router, type RequestHandler } from 'express';
+import { createEnsureAuthenticated } from './middlewares/ensure-authenticated.js';
 import { uploadRateLimiter } from './middlewares/upload-rate-limiter.js';
-import multer from 'multer';
 import { RegisterUserController } from './controllers/register-user.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
 import { ReadInvoiceUseCase } from './use-cases/read-invoice/read-invoice.use-case.js';
@@ -29,10 +28,64 @@ import { CreateCompanyUseCase } from './use-cases/create-company/create-company.
 import { CreateCompanyController } from './controllers/create-company.controller.js';
 import { PrismaCompanyRepository } from './repositories/prisma-company.repository.js';
 import { PrismaStockRepository } from './repositories/prisma-stock.repository.js';
+import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoice-persistence.repository.js';
+import { invoiceUpload } from './middlewares/invoice-upload.js';
+import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
+import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
+import {
+  createCompanyBodySchema,
+  listProductsQuerySchema,
+  loginBodySchema,
+  registerUserBodySchema,
+  stockSuggestionParamsSchema,
+  suggestionDecisionParamsSchema,
+  emptyCommandBodySchema,
+} from './schemas/http.schemas.js';
+import { PrismaProductSuggestionRepository } from './repositories/prisma-product-suggestion.repository.js';
+import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
+import { RejectProductSuggestionUseCase } from './use-cases/product-suggestions/reject-product-suggestion.use-case.js';
+import { ListPendingProductSuggestionsUseCase } from './use-cases/product-suggestions/list-pending-product-suggestions.use-case.js';
+import {
+  ConfirmProductSuggestionController,
+  RejectProductSuggestionController,
+  ListPendingProductSuggestionsController,
+} from './controllers/product-suggestion.controllers.js';
 
-export const routes = Router();
+interface HttpController {
+  handle: RequestHandler;
+}
 
-const upload = multer({ dest: 'tmp/' });
+export interface CreateRoutesOptions {
+  authenticate: RequestHandler;
+  uploadRateLimiter: RequestHandler;
+  loginRateLimiter: RequestHandler;
+  userRegistrationRateLimiter: RequestHandler;
+  invoiceUpload: RequestHandler;
+  controllers: {
+    registerUser: HttpController;
+    login: HttpController;
+    createCompany: HttpController;
+    listProducts: HttpController;
+    uploadInvoice: HttpController;
+    confirmSuggestion: HttpController;
+    rejectSuggestion: HttpController;
+    listSuggestions: HttpController;
+  };
+}
+
+export function createRoutes(options: CreateRoutesOptions) {
+  const router = Router();
+  const { controllers } = options;
+  router.post('/invoices/upload', options.authenticate, options.uploadRateLimiter, options.invoiceUpload, controllers.uploadInvoice.handle.bind(controllers.uploadInvoice));
+  router.post('/users', options.userRegistrationRateLimiter, validateBody(registerUserBodySchema), controllers.registerUser.handle.bind(controllers.registerUser));
+  router.post('/login', options.loginRateLimiter, validateBody(loginBodySchema), controllers.login.handle.bind(controllers.login));
+  router.get('/products', options.authenticate, validateQuery(listProductsQuerySchema), controllers.listProducts.handle.bind(controllers.listProducts));
+  router.post('/companies', options.authenticate, validateBody(createCompanyBodySchema), controllers.createCompany.handle.bind(controllers.createCompany));
+  router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
+  router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
+  router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
+  return router;
+}
 
 // Injeção - Compartilhados / Repositórios
 const storageProvider = new DiskStorageProvider();
@@ -41,6 +94,8 @@ const productRepository = new PrismaProductRepository();
 const auditLogRepository = new PrismaAuditLogRepository();
 const stockRepository = new PrismaStockRepository();
 const companyRepository = new PrismaCompanyRepository();
+const invoicePersistenceRepository = new PrismaInvoicePersistenceRepository();
+const productSuggestionRepository = new PrismaProductSuggestionRepository();
 
 // Injeção - Notas Fiscais e Auditoria
 const readInvoiceUseCase = new ReadInvoiceUseCase(
@@ -48,11 +103,12 @@ const readInvoiceUseCase = new ReadInvoiceUseCase(
   aiProvider, 
   productRepository, 
   auditLogRepository,
-  stockRepository
+  stockRepository,
+  invoicePersistenceRepository
 );
 
-const uploadInvoiceController = new UploadInvoiceController(readInvoiceUseCase);
-const listProductsUseCase = new ListProductsUseCase(productRepository);
+const uploadInvoiceController = new UploadInvoiceController(readInvoiceUseCase, storageProvider);
+const listProductsUseCase = new ListProductsUseCase(productRepository, stockRepository);
 const listProductsController = new ListProductsController(listProductsUseCase);
 
 // Compartilhado - Usuários
@@ -65,6 +121,7 @@ const registerUserController = new RegisterUserController(registerUserUseCase);
 
 // INJEÇÃO - LOGIN
 const tokenProvider = new JoseTokenProvider();
+const ensureAuthenticated = createEnsureAuthenticated({ tokenProvider, userRepository });
 const loginUseCase = new LoginUseCase(userRepository, hashProvider, tokenProvider);
 const loginController = new LoginController(loginUseCase);
 
@@ -75,30 +132,30 @@ const createCompanyUseCase = new CreateCompanyUseCase(
   auditLogRepository
 );
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
-
-// ROTAS
-routes.post(
-  '/invoices/upload',
-  ensureAuthenticated,  // 1º: Valida o token do usuário (se falhar, para aqui)
-  uploadRateLimiter,    // 2º: Checa limite de requisições por usuário/IP (se exceder, para aqui)
-  upload.single('file'),// 3º: Só grava o arquivo em disk/tmp se passou na auth e no rate limit
-  uploadInvoiceController.handle.bind(uploadInvoiceController) // 4º: Processa a regra
+const confirmSuggestionController = new ConfirmProductSuggestionController(
+  new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository),
+);
+const rejectSuggestionController = new RejectProductSuggestionController(
+  new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository),
+);
+const listSuggestionsController = new ListPendingProductSuggestionsController(
+  new ListPendingProductSuggestionsUseCase(productSuggestionRepository, stockRepository),
 );
 
-routes.post('/users', (req, res) => {
-  registerUserController.handle(req, res);
-});
-
-// ROTA DE LOGIN
-routes.post('/login', (req, res) => {
-  loginController.handle(req, res);
-});
-
-routes.get('/products', ensureAuthenticated, (req, res) => {
-  listProductsController.handle(req, res);
-});
-
-// ROTA DE CRIAÇÃO DE EMPRESA
-routes.post('/companies', ensureAuthenticated, (req, res) => {
-  createCompanyController.handle(req, res);
+export const routes = createRoutes({
+  authenticate: ensureAuthenticated,
+  uploadRateLimiter,
+  loginRateLimiter,
+  userRegistrationRateLimiter,
+  invoiceUpload: invoiceUpload.single('file'),
+  controllers: {
+    registerUser: registerUserController,
+    login: loginController,
+    createCompany: createCompanyController,
+    listProducts: listProductsController,
+    uploadInvoice: uploadInvoiceController,
+    confirmSuggestion: confirmSuggestionController,
+    rejectSuggestion: rejectSuggestionController,
+    listSuggestions: listSuggestionsController,
+  },
 });

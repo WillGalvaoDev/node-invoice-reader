@@ -18,6 +18,7 @@ export class CreateCompanyController {
       name,
       cnpj,
       ownerId,
+      requestId: request.requestId,
     });
 
     return response.status(201).json({

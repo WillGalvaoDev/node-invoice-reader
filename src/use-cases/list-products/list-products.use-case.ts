@@ -1,28 +1,27 @@
-import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
+import type { IProductPage, IProductRepository } from '../../repositories/product.repository.js';
+import type { IStockRepository } from '../../repositories/stock.repository.js';
+import { AppError } from '../../errors/app-error.js';
 
 interface IListProductsRequest {
   userId: string;
-  stockId?: string | undefined;
-  companyId?: string | undefined;
+  stockId: string;
+  limit: number;
+  cursor?: string | undefined;
 }
 
 export class ListProductsUseCase {
-  constructor(private productRepository: IProductRepository) {}
+  constructor(
+    private productRepository: IProductRepository,
+    private stockRepository: Pick<IStockRepository, 'findByIdForViewer'>,
+  ) {}
 
-  async execute({ userId, stockId, companyId }: IListProductsRequest): Promise<IProduct[]> {
-    console.log('🔍 [ListProductsUseCase] Recebido para execução:', { userId, stockId, companyId });
-
-    if (stockId) {
-      console.log('➡️ [ListProductsUseCase] Entrando na busca por stockId...');
-      return this.productRepository.findByStockId(stockId, userId);
+  async execute({ userId, stockId, limit, cursor }: IListProductsRequest): Promise<IProductPage> {
+    const stock = await this.stockRepository.findByIdForViewer(stockId, userId);
+    if (!stock) throw new AppError('Acesso não autorizado ao estoque informado.', 403);
+    if (cursor) {
+      const cursorProduct = await this.productRepository.findById(cursor);
+      if (!cursorProduct || cursorProduct.stockId !== stockId) throw new AppError('Cursor de produto inválido.', 400);
     }
-
-    if (companyId) {
-      console.log('➡️ [ListProductsUseCase] Entrando na busca por companyId...');
-      return this.productRepository.findByCompanyId(companyId, userId);
-    }
-
-    console.log('➡️ [ListProductsUseCase] Entrando na busca padrao por userId...');
-    return this.productRepository.findByUserId(userId);
+    return this.productRepository.findPageByStockId({ stockId, limit, cursor });
   }
 }

@@ -1,39 +1,41 @@
-import { PrismaClient } from '@prisma/client';
-import type { IProductRepository, IProduct } from './product.repository.js';
+import type { IProductRepository, IProduct, IProductPage, IProductPageQuery } from './product.repository.js';
 import { ProductMapper } from '../mappers/product.mapper.js';
-import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { prisma } from '../infra/prisma.js';
+import { AppError } from '../errors/app-error.js';
+import { isPrismaErrorCode } from '../errors/prisma-error.js';
 
 export class PrismaProductRepository implements IProductRepository {
   async save(product: IProduct): Promise<IProduct> {
-    const createdProduct = await prisma.product.create({
-      data: {
-        code: product.code,
-        description: product.description,
-        quantity: Number(product.quantity),
-        unitMeasurement: product.unitMeasurement,
-        unitPrice: Number(product.unitPrice),
-        totalPrice: Number(product.totalPrice),
-        stockId: product.stockId,
-        userId: product.userId ?? null,
-      },
-    });
+    let createdProduct;
+    try {
+      createdProduct = await prisma.product.create({
+        data: {
+          code: product.code,
+          description: product.description,
+          quantity: Number(product.quantity),
+          unitMeasurement: product.unitMeasurement,
+          unitPrice: Number(product.unitPrice),
+          totalPrice: Number(product.totalPrice),
+          stockId: product.stockId,
+          userId: product.userId ?? null,
+        },
+      });
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) {
+        throw new AppError('Produto já cadastrado neste estoque.', 409);
+      }
+      if (isPrismaErrorCode(error, 'P2003')) {
+        throw new AppError('Estoque ou usuário relacionado inválido.', 400);
+      }
+      throw error;
+    }
 
-    console.log(`💾 [Prisma Banco Real] Produto persistido com sucesso: ${createdProduct.description}`);
     return ProductMapper.toDomain(createdProduct);
   }
 
   async findByCode(code: string, stockId: string): Promise<IProduct | null> {
-    const product = await prisma.product.findFirst({
-      where: { code, stockId },
+    const product = await prisma.product.findUnique({
+      where: { stockId_code: { stockId, code } },
     });
 
     if (!product) return null;
@@ -41,48 +43,24 @@ export class PrismaProductRepository implements IProductRepository {
     return ProductMapper.toDomain(product);
   }
 
-  async findByUserId(userId: string): Promise<IProduct[]> {
-    console.log(`🛢️ [Prisma] Buscando produtos onde userId === "${userId}"`);
-    
+  async findByStockId(stockId: string): Promise<IProduct[]> {
     const products = await prisma.product.findMany({
-      where: { userId },
+      where: { stockId },
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`🛢️ [Prisma] Produtos encontrados no banco: ${products.length}`);
     return products.map(ProductMapper.toDomain);
   }
 
-  async findByStockId(stockId: string, userId?: string): Promise<IProduct[]> {
-    console.log(`🛢️ [Prisma] Buscando produtos com stockId = "${stockId}" e userId = "${userId}"`);
-    
+  async findPageByStockId({ stockId, limit, cursor }: IProductPageQuery): Promise<IProductPage> {
     const products = await prisma.product.findMany({
-      where: {
-        stockId,
-        ...(userId && { userId }),
-      },
-      orderBy: { createdAt: 'desc' },
+      where: { stockId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-
-    console.log(`🛢️ [Prisma] Produtos encontrados por estoque: ${products.length}`);
-    return products.map(ProductMapper.toDomain);
-  }
-
-  async findByCompanyId(companyId: string, userId?: string): Promise<IProduct[]> {
-    console.log(`🛢️ [Prisma] Buscando produtos com companyId = "${companyId}" e userId = "${userId}"`);
-    
-    const products = await prisma.product.findMany({
-      where: {
-        stock: {
-          companyId,
-        },
-        ...(userId && { userId }),
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    console.log(`🛢️ [Prisma] Produtos encontrados por empresa: ${products.length}`);
-    return products.map(ProductMapper.toDomain);
+    const items = products.slice(0, limit).map(ProductMapper.toDomain);
+    return { items, nextCursor: products.length > limit ? items.at(-1)?.id ?? null : null };
   }
 
   async findById(id: string): Promise<IProduct | null> {
@@ -96,26 +74,42 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async update(id: string, data: Partial<IProduct>): Promise<IProduct> {
-    const updatedProduct = await prisma.product.update({
-      where: { id },
-      data: {
-        ...(data.code !== undefined && { code: data.code }),
-        ...(data.description !== undefined && { description: data.description }),
-        ...(data.quantity !== undefined && { quantity: Number(data.quantity) }),
-        ...(data.unitMeasurement !== undefined && { unitMeasurement: data.unitMeasurement }),
-        ...(data.unitPrice !== undefined && { unitPrice: Number(data.unitPrice) }),
-        ...(data.totalPrice !== undefined && { totalPrice: Number(data.totalPrice) }),
-        ...(data.stockId !== undefined && { stockId: data.stockId }),
-        ...(data.userId !== undefined && { userId: data.userId ?? null }),
-      },
-    });
+    let updatedProduct;
+    try {
+      updatedProduct = await prisma.product.update({
+        where: { id },
+        data: {
+          ...(data.code !== undefined && { code: data.code }),
+          ...(data.description !== undefined && { description: data.description }),
+          ...(data.quantity !== undefined && { quantity: Number(data.quantity) }),
+          ...(data.unitMeasurement !== undefined && { unitMeasurement: data.unitMeasurement }),
+          ...(data.unitPrice !== undefined && { unitPrice: Number(data.unitPrice) }),
+          ...(data.totalPrice !== undefined && { totalPrice: Number(data.totalPrice) }),
+          ...(data.stockId !== undefined && { stockId: data.stockId }),
+          ...(data.userId !== undefined && { userId: data.userId ?? null }),
+        },
+      });
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2002')) {
+        throw new AppError('Produto já cadastrado neste estoque.', 409);
+      }
+      if (isPrismaErrorCode(error, 'P2003')) {
+        throw new AppError('Estoque ou usuário relacionado inválido.', 400);
+      }
+      throw error;
+    }
 
     return ProductMapper.toDomain(updatedProduct);
   }
 
   async delete(id: string): Promise<void> {
-    await prisma.product.delete({
-      where: { id },
-    });
+    try {
+      await prisma.product.delete({ where: { id } });
+    } catch (error) {
+      if (isPrismaErrorCode(error, 'P2003')) {
+        throw new AppError('Produto possui referências e não pode ser removido.', 409);
+      }
+      throw error;
+    }
   }
 }

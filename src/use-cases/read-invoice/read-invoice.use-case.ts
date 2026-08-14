@@ -4,15 +4,28 @@ import type { IProductRepository, IProduct } from '../../repositories/product.re
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
 import { AppError } from '../../errors/app-error.js';
+import type { IInvoicePersistenceRepository, IInvoiceProductOperation } from '../../repositories/invoice-persistence.repository.js';
+import type { DanfeMimeType } from '../../config/upload.js';
+import { logger, type Logger } from '../../infra/logger.js';
+import { persistAuditBestEffort } from '../best-effort-audit.js';
+import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.js';
+import { randomUUID } from 'node:crypto';
+import type { IInvoiceSuggestionOperation } from '../../repositories/invoice-persistence.repository.js';
+import { parseCnpj } from '../../domain/cnpj.js';
+import { assertDanfeCoherence } from '../../domain/danfe-coherence.js';
+import { aiTelemetry, recordAiTelemetryBestEffort, type IAiTelemetry } from '../../infra/ai-telemetry.js';
 
 interface IReadInvoiceRequest {
   filePath: string;
+  mimeType: DanfeMimeType;
   stockId: string;
   userId?: string | undefined;
-  companyId?: string | undefined;
+  requestId?: string | undefined;
 }
 
 export interface IProductSuggestion {
+  id: string;
+  status: 'PENDING';
   invoiceItem: IDanfeExtractResult['products'][number];
   suggestedProduct: IProduct;
   confidence: number;
@@ -31,7 +44,10 @@ export class ReadInvoiceUseCase {
     private readonly aiProvider: IAiProvider,
     private readonly productRepository: IProductRepository,
     private readonly auditLogRepository: IAuditLogRepository,
-    private readonly stockRepository: IStockRepository
+    private readonly stockRepository: IStockRepository,
+    private readonly invoicePersistenceRepository: IInvoicePersistenceRepository,
+    private readonly applicationLogger: Logger = logger,
+    private readonly telemetry: IAiTelemetry = aiTelemetry,
   ) {}
 
   private sanitizeString(input: string): string {
@@ -42,28 +58,60 @@ export class ReadInvoiceUseCase {
       .trim();
   }
 
-  async execute({ filePath, stockId, userId, companyId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
+  private productAuditState(product: IProduct) {
+    return {
+      quantity: product.quantity,
+      unitPrice: product.unitPrice,
+      totalPrice: product.totalPrice,
+    };
+  }
+
+  async execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
-      // 🔒 VALIDAÇÃO DE AUTORIZAÇÃO / EXISTÊNCIA DO ESTOQUE
-      const stockExists = await this.stockRepository.findById(stockId);
+      const authorizedStock = userId
+        ? await this.stockRepository.findByIdForUser(stockId, userId)
+        : null;
 
-if (!stockExists) {
-  await this.auditLogRepository.create({
-    action: 'UNAUTHORIZED_ACCESS',
-    entity: 'INVOICE',
-    details: `Tentativa de acesso negada ao estoque: ${stockId}`,
-    ...(userId && { userId }),
-    ...(companyId && { companyId }),
-  });
+      if (!authorizedStock) {
+        const requestedStock = await this.stockRepository.findById(stockId);
+        await persistAuditBestEffort({
+          repository: this.auditLogRepository,
+          logger: this.applicationLogger,
+          requestId,
+          log: {
+            action: 'UNAUTHORIZED_ACCESS',
+            entity: 'INVOICE',
+            description: 'Tentativa de acesso não autorizado ao estoque.',
+            ...(userId && { userId }),
+            ...(requestedStock && { stockId: requestedStock.id, companyId: requestedStock.companyId }),
+          },
+        });
 
-  throw new AppError('Acesso não autorizado ao estoque informado.', 403);
-}
+        throw new AppError('Acesso não autorizado ao estoque informado.', 403);
+      }
 
       // 1. Extrai os dados da nota fiscal via Gemini OCR
-      const extractedData = await this.aiProvider.extractDanfeData(filePath);
+      const rawExtractedData = requestId
+        ? await this.aiProvider.extractDanfeData(filePath, mimeType, { requestId })
+        : await this.aiProvider.extractDanfeData(filePath, mimeType);
+
+      let supplierCnpj: string;
+      try {
+        supplierCnpj = parseCnpj(rawExtractedData.supplier.cnpj);
+      } catch {
+        throw new AppError('O DANFE contém um CNPJ inválido.', 422);
+      }
+      const extractedData = {
+        ...rawExtractedData,
+        supplier: { ...rawExtractedData.supplier, cnpj: supplierCnpj },
+      };
 
       if (!extractedData || !extractedData.products || extractedData.products.length === 0) {
         throw new AppError('Falha ao extrair produtos do DANFE. Nenhum item válido encontrado.', 400);
+      }
+
+      if (!/^\d{44}$/.test(extractedData.accessKey)) {
+        throw new AppError('Chave de acesso da NF-e inválida.', 422);
       }
 
       const hasInvalidNumbers = extractedData.products.some(
@@ -74,44 +122,78 @@ if (!stockExists) {
         throw new AppError('Os produtos do DANFE contêm valores ou quantidades inválidas.', 400);
       }
 
+      assertDanfeCoherence(extractedData);
+
       const processedProducts: IProduct[] = [];
       const suggestions: IProductSuggestion[] = [];
+      const operations: IInvoiceProductOperation[] = [];
+      const suggestionOperations: IInvoiceSuggestionOperation[] = [];
 
       const existingStockProducts = await this.productRepository.findByStockId(stockId);
+      const auditStateByProductCode = new Map(
+        existingStockProducts.map((product) => [product.code, product] as const),
+      );
 
-      for (const rawItem of extractedData.products) {
+      for (const [itemIndex, rawItem] of extractedData.products.entries()) {
         const item = {
           ...rawItem,
           description: this.sanitizeString(rawItem.description),
         };
 
-        const existingByCode = await this.productRepository.findByCode(item.code, stockId);
+        const existingByCode = existingStockProducts.find((product) => product.code === item.code)
+          ?? await this.productRepository.findByCode(item.code, stockId);
 
-        if (existingByCode && existingByCode.id) {
-          const updatedProduct = await this.productRepository.update(existingByCode.id, {
-            quantity: existingByCode.quantity + Number(item.quantity),
-            unitPrice: Number(item.unitPrice),
-            totalPrice: Number(item.totalPrice),
-            description: item.description,
+        if (existingByCode) {
+          if (!auditStateByProductCode.has(item.code)) {
+            auditStateByProductCode.set(item.code, existingByCode);
+          }
+          operations.push({
+            product: {
+              ...existingByCode,
+              description: item.description,
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+              totalPrice: Number(item.totalPrice),
+            },
           });
-          processedProducts.push(updatedProduct);
           continue;
         }
 
-        const similarityMatch: ISimilarityMatch | null =
-          await this.aiProvider.findSimilarProduct(item.description, existingStockProducts);
+        const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
+        const similarityMatch: ISimilarityMatch | null = candidates.length > 0
+          ? requestId
+            ? await this.aiProvider.findSimilarProduct(item.description, candidates, { requestId })
+            : await this.aiProvider.findSimilarProduct(item.description, candidates)
+          : null;
 
-        if (similarityMatch) {
+        if (similarityMatch?.product.id) {
+          const suggestionId = randomUUID();
           suggestions.push({
+            id: suggestionId,
+            status: 'PENDING',
             invoiceItem: item,
             suggestedProduct: similarityMatch.product,
+            confidence: similarityMatch.confidence,
+            reason: similarityMatch.reason,
+          });
+          suggestionOperations.push({
+            id: suggestionId,
+            itemIndex,
+            suggestedProductId: similarityMatch.product.id,
+            receivedCode: item.code,
+            receivedDescription: item.description,
+            receivedQuantity: Number(item.quantity),
+            receivedUnitPrice: Number(item.unitPrice),
+            unitMeasurement: item.unitMeasurement,
             confidence: similarityMatch.confidence,
             reason: similarityMatch.reason,
           });
           continue;
         }
 
-        const newProduct = await this.productRepository.save({
+        const newProductId = randomUUID();
+        const newProduct: IProduct = {
+          id: newProductId,
           code: item.code,
           description: item.description,
           quantity: Number(item.quantity),
@@ -120,19 +202,72 @@ if (!stockExists) {
           totalPrice: Number(item.totalPrice),
           stockId,
           userId: userId ?? null,
+        };
+        operations.push({
+          product: newProduct,
         });
-
-        processedProducts.push(newProduct);
+        existingStockProducts.push(newProduct);
       }
 
-      await this.auditLogRepository.create({
-        action: 'CREATE',
-        entity: 'INVOICE',
-        entityId: extractedData.accessKey || extractedData.invoiceNumber,
-        details: `Nota Fiscal nº ${extractedData.invoiceNumber} lida. ${processedProducts.length} produtos processados, ${suggestions.length} sugestões pendentes.`,
-        ...(userId && { userId }),
-        ...(companyId && { companyId }),
+      processedProducts.push(...await this.invoicePersistenceRepository.persist({
+        accessKey: extractedData.accessKey,
+        stockId,
+        operations,
+        suggestions: suggestionOperations,
+      }));
+
+      for (const suggestion of suggestions) {
+        recordAiTelemetryBestEffort(
+          () => this.telemetry.recordSuggestion({ decision: 'created', confidence: suggestion.confidence }),
+          this.applicationLogger,
+          { event: 'ai_suggestion', decision: 'created', ...(requestId && { requestId }) },
+        );
+      }
+
+      await persistAuditBestEffort({
+        repository: this.auditLogRepository,
+        logger: this.applicationLogger,
+        requestId,
+        log: {
+          action: 'CREATE',
+          entity: 'INVOICE',
+          entityId: extractedData.accessKey,
+          description: 'Invoice processada com sucesso.',
+          ...(userId && { userId }),
+          companyId: authorizedStock.companyId,
+          stockId,
+          previousState: null,
+          newState: {
+            processedProductCount: operations.length,
+            pendingSuggestionCount: suggestions.length,
+          },
+        },
       });
+
+      for (const [index, operation] of operations.entries()) {
+        const persistedProduct = processedProducts[index];
+        if (!persistedProduct?.id) continue;
+        const previousProduct = auditStateByProductCode.get(operation.product.code);
+
+        await persistAuditBestEffort({
+          repository: this.auditLogRepository,
+          logger: this.applicationLogger,
+          requestId,
+          log: {
+            action: previousProduct ? 'UPDATE' : 'CREATE',
+            entity: 'PRODUCT',
+            entityId: persistedProduct.id,
+            description: 'Entrada de estoque processada por invoice.',
+            ...(userId && { userId }),
+            companyId: authorizedStock.companyId,
+            stockId,
+            previousState: previousProduct ? this.productAuditState(previousProduct) : null,
+            newState: this.productAuditState(persistedProduct),
+          },
+        });
+
+        auditStateByProductCode.set(operation.product.code, persistedProduct);
+      }
 
       return {
         extractedData,
@@ -140,12 +275,13 @@ if (!stockExists) {
         suggestions,
       };
     } finally {
-      console.log(`[Use Case] Tentando deletar arquivo em: ${filePath}`);
       try {
         await this.storageProvider.deleteFile(filePath);
-        console.log(`[Storage] Arquivo temporário removido: ${filePath}`);
       } catch (error) {
-        console.error(`[Storage] Erro ao deletar arquivo temporário: ${filePath}`, error);
+        this.applicationLogger.warn('Temporary file cleanup failed', {
+          ...(requestId && { requestId }),
+          error: { name: error instanceof Error ? error.name : 'UnknownError' },
+        });
       }
     }
   }

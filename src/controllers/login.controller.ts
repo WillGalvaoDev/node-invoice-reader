@@ -7,16 +7,12 @@ export class LoginController {
   async handle(req: Request, res: Response): Promise<Response> {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Missing email or password.' });
-    }
-
     try {
       const { token } = await this.loginUseCase.execute({ email, password });
       return res.status(200).json({ token });
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Retorna 401 Unauthorized para erros de credenciais inválidas
-      if (error.message === 'Invalid email or password.') {
+      if (error instanceof Error && error.message === 'Invalid email or password.') {
         return res.status(401).json({ error: error.message });
       }
 

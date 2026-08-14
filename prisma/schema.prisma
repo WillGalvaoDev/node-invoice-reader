@@ -3,8 +3,7 @@ datasource db {
 }
 
 generator client {
-  provider   = "prisma-client-js"
-  engineType = "binary"
+  provider = "prisma-client-js"
 }
 
 model User {
@@ -15,10 +14,11 @@ model User {
   createdAt DateTime @default(now())
 
   // Relacionamentos
-  ownedCompanies  Company[]             @relation("CompanyOwner")
-  collaborations  CompanyCollaborator[]
-  auditLogs       AuditLog[]
-  createdProducts Product[]             @relation("CreatedBy")
+  ownedCompanies     Company[]                     @relation("CompanyOwner")
+  collaborations     CompanyCollaborator[]
+  auditLogs          AuditLog[]
+  createdProducts    Product[]                     @relation("CreatedBy")
+  decidedSuggestions ProductSimilaritySuggestion[] @relation("SuggestionDecidedBy")
 
   @@map("users")
 }
@@ -31,10 +31,10 @@ model Company {
   createdAt DateTime @default(now())
 
   // Relacionamentos
-  owner        User                  @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  stocks       Stock[]
+  owner         User                  @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  stocks        Stock[]
   collaborators CompanyCollaborator[]
-  auditLogs    AuditLog[]
+  auditLogs     AuditLog[]
 
   @@map("companies")
 }
@@ -46,8 +46,8 @@ model CompanyCollaborator {
   createdAt DateTime @default(now())
 
   // Relacionamentos
-  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   permissions StockPermission[]
 
   @@unique([companyId, userId])
@@ -61,13 +61,27 @@ model Stock {
   createdAt DateTime @default(now())
 
   // Relacionamentos
-  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products    Product[]
-  permissions StockPermission[]
-  auditLogs   AuditLog[]
+  company            Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products           Product[]
+  permissions        StockPermission[]
+  auditLogs          AuditLog[]
+  processedInvoices  ProcessedInvoice[]
+  productSuggestions ProductSimilaritySuggestion[]
 
   @@unique([companyId, name])
   @@map("stocks")
+}
+
+model ProcessedInvoice {
+  id        String   @id @default(uuid())
+  accessKey String   @unique
+  stockId   String
+  createdAt DateTime @default(now())
+
+  stock              Stock                         @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  productSuggestions ProductSimilaritySuggestion[]
+
+  @@map("processed_invoices")
 }
 
 model StockPermission {
@@ -90,8 +104,8 @@ model StockPermission {
 model Product {
   id              String   @id @default(uuid())
   code            String
-  ean             String?  // Opcional por enquanto
-  ncm             String?  // Opcional por enquanto
+  ean             String? // Opcional por enquanto
+  ncm             String? // Opcional por enquanto
   description     String
   quantity        Decimal  @db.Decimal(12, 4)
   unitMeasurement String
@@ -104,12 +118,47 @@ model Product {
   stock   Stock  @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
   // Rastreabilidade de quem cadastrou
-  userId String?
-  user   User?   @relation("CreatedBy", fields: [userId], references: [id], onDelete: SetNull)
+  userId                String?
+  user                  User?                         @relation("CreatedBy", fields: [userId], references: [id], onDelete: SetNull)
+  similaritySuggestions ProductSimilaritySuggestion[] @relation("SuggestedProduct")
 
   @@unique([stockId, code])
   @@index([stockId])
   @@map("products")
+}
+
+enum ProductSuggestionStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+model ProductSimilaritySuggestion {
+  id                  String                  @id @default(uuid())
+  processedInvoiceId  String
+  itemIndex           Int
+  stockId             String
+  suggestedProductId  String
+  receivedCode        String
+  receivedDescription String
+  receivedQuantity    Decimal                 @db.Decimal(12, 4)
+  receivedUnitPrice   Decimal                 @db.Decimal(12, 2)
+  unitMeasurement     String
+  confidence          Decimal                 @db.Decimal(5, 4)
+  reason              String
+  status              ProductSuggestionStatus @default(PENDING)
+  decidedAt           DateTime?
+  decidedByUserId     String?
+  createdAt           DateTime                @default(now())
+
+  processedInvoice ProcessedInvoice @relation(fields: [processedInvoiceId], references: [id], onDelete: Cascade)
+  stock            Stock            @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  suggestedProduct Product          @relation("SuggestedProduct", fields: [suggestedProductId], references: [id], onDelete: Restrict)
+  decidedByUser    User?            @relation("SuggestionDecidedBy", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([processedInvoiceId, itemIndex])
+  @@index([stockId, status])
+  @@map("product_similarity_suggestions")
 }
 
 enum AuditAction {
@@ -121,18 +170,18 @@ enum AuditAction {
 }
 
 model AuditLog {
-  id          String      @id @default(uuid())
-  companyId   String?
-  stockId     String?
-  userId      String?
-  action      AuditAction
-  details     String?
-  entity      String
-  entityId    String?
-  description String?
+  id            String      @id @default(uuid())
+  companyId     String?
+  stockId       String?
+  userId        String?
+  action        AuditAction
+  details       String?
+  entity        String
+  entityId      String?
+  description   String?
   previousState Json?
   newState      Json?
-  createdAt   DateTime    @default(now())
+  createdAt     DateTime    @default(now())
 
   // Relacionamentos
   company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)

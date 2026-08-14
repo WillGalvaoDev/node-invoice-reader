@@ -12,6 +12,10 @@ export class InMemoryAuditLogRepository implements IAuditLogRepository {
       details: log.details ?? null,
       userId: log.userId ?? null,
       companyId: log.companyId ?? null,
+      stockId: log.stockId ?? null,
+      description: log.description ?? null,
+      previousState: log.previousState ?? null,
+      newState: log.newState ?? null,
       createdAt: log.createdAt ?? new Date(),
     };
 

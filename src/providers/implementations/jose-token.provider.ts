@@ -1,16 +1,13 @@
 import { SignJWT, jwtVerify } from 'jose';
 import type { ITokenProvider, ITokenPayload } from '../token.provider.js';
+import { env } from '../../config/env.js';
 
 export class JoseTokenProvider implements ITokenProvider {
   private secret: Uint8Array;
 
   constructor() {
-    const secretKey = process.env.JWT_SECRET;
-    if (!secretKey) {
-      throw new Error('JWT_SECRET environment variable is missing.');
-    }
     // O jose exige que a string da chave seja convertida em um Uint8Array
-    this.secret = new TextEncoder().encode(secretKey);
+    this.secret = new TextEncoder().encode(env.JWT_SECRET);
   }
 
   async generateToken(payload: ITokenPayload): Promise<string> {

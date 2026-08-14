@@ -1,5 +1,6 @@
 import type { IUserRepository, IUser } from '../../repositories/user.repository.js';
 import type { IHashProvider } from '../../providers/hash.provider.js';
+import { AppError } from '../../errors/app-error.js';
 
 interface IRegisterUserRequest {
   name: string;
@@ -18,7 +19,7 @@ export class RegisterUserUseCase {
     const userAlreadyExists = await this.userRepository.findByEmail(email);
     
     if (userAlreadyExists) {
-      throw new Error('User already exists.');
+      throw new AppError('Já existe um usuário cadastrado com este email.', 409);
     }
 
     // 2. Criptografa a senha usando o abstraído Argon2

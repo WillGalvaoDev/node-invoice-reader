@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/docscan_ci
+      JWT_SECRET: ci-only-jwt-secret
+      GEMINI_API_KEY: ci-only-gemini-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:validate
+      - run: npm run prisma:generate
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:integration:postgres:docker
+
+  production-runtime:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://runtime_check:runtime_check@127.0.0.1:5432/docscan
+      JWT_SECRET: runtime-check-secret-not-for-production
+      GEMINI_API_KEY: runtime-check-gemini-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run build
+      - name: Keep production dependencies only
+        run: npm prune --omit=dev
+      - run: npm ls --omit=dev
+      - run: npm run verify:production

@@ -1,4 +1,4 @@
-import type { IProduct, IProductRepository } from '../product.repository.js';
+import type { IProduct, IProductPage, IProductPageQuery, IProductRepository } from '../product.repository.js';
 
 export class InMemoryProductRepository implements IProductRepository {
   public items: IProduct[] = [];
@@ -18,52 +18,37 @@ export class InMemoryProductRepository implements IProductRepository {
       userId: product.userId ?? null,
       createdAt: product.createdAt ?? new Date(),
     };
-
     this.items.push(newProduct);
     return newProduct;
   }
 
   async findByCode(code: string, stockId: string): Promise<IProduct | null> {
-    const product = this.items.find(
-      (item) => item.code === code && item.stockId === stockId
-    );
-    return product ?? null;
+    return this.items.find((item) => item.code === code && item.stockId === stockId) ?? null;
   }
 
-  async findByUserId(userId: string): Promise<IProduct[]> {
-    return this.items.filter((item) => item.userId === userId);
+  async findByStockId(stockId: string): Promise<IProduct[]> {
+    return this.items.filter((item) => item.stockId === stockId);
   }
 
-  async findByStockId(stockId: string, userId?: string): Promise<IProduct[]> {
-    return this.items.filter((item) => {
-      const matchesStock = item.stockId === stockId;
-      const matchesUser = userId ? item.userId === userId : true;
-      return matchesStock && matchesUser;
+  async findPageByStockId({ stockId, limit, cursor }: IProductPageQuery): Promise<IProductPage> {
+    const ordered = this.items.filter((item) => item.stockId === stockId).sort((left, right) => {
+      const byCreatedAt = (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0);
+      return byCreatedAt || (right.id ?? '').localeCompare(left.id ?? '');
     });
-  }
-
-  async findByCompanyId(companyId: string, userId?: string): Promise<IProduct[]> {
-    return this.items.filter((item) => {
-      // Em memória, mantemos a verificação do usuário caso informado
-      const matchesUser = userId ? item.userId === userId : true;
-      return matchesUser;
-    });
+    const cursorIndex = cursor ? ordered.findIndex((item) => item.id === cursor) : -1;
+    const pageWithExtra = ordered.slice(cursorIndex + 1, cursorIndex + 1 + limit + 1);
+    const items = pageWithExtra.slice(0, limit);
+    return { items, nextCursor: pageWithExtra.length > limit ? items.at(-1)?.id ?? null : null };
   }
 
   async findById(id: string): Promise<IProduct | null> {
-    const product = this.items.find((item) => item.id === id);
-    return product ?? null;
+    return this.items.find((item) => item.id === id) ?? null;
   }
 
   async update(id: string, data: Partial<IProduct>): Promise<IProduct> {
     const index = this.items.findIndex((item) => item.id === id);
     if (index === -1) throw new Error('Product not found');
-
-    const updatedProduct = {
-      ...this.items[index],
-      ...data,
-    } as IProduct;
-
+    const updatedProduct = { ...this.items[index], ...data } as IProduct;
     this.items[index] = updatedProduct;
     return updatedProduct;
   }

@@ -2,11 +2,21 @@
   "name": "docscan",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "test": "vitest run",
+    "test:integration:postgres": "vitest run --config vitest.integration.config.ts",
+    "test:integration:postgres:docker": "node scripts/postgres-integration.mjs",
     "dev": "tsx watch --env-file=.env src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "start": "node src/index.js",
+    "verify:production": "node scripts/verify-production-runtime.mjs"
   },
   "keywords": [],
   "author": "",
@@ -28,10 +38,13 @@
     "@prisma/client": "^7.8.0",
     "argon2": "^0.45.0",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.0",
+    "helmet": "^8.3.0",
     "jose": "^6.2.3",
     "multer": "^2.2.0",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
   }
 }
