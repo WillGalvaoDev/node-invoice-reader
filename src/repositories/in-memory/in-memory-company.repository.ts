@@ -1,10 +1,12 @@
-import type { ICompany, ICompanyRepository } from '../company.repository.js';
+import type { ICompany, ICompanyPage, ICompanyPageQuery, ICompanyRepository } from '../company.repository.js';
 import type { IStock } from '../stock.repository.js';
 
 export class InMemoryCompanyRepository implements ICompanyRepository {
   public items: ICompany[] = [];
   public stocks: IStock[] = [];
   public failNextStockCreation = false;
+  // companyId -> Set<userId>, mesmo padrão de InMemoryStockRepository.viewAuthorizedUserIds.
+  public collaboratorUserIds = new Map<string, Set<string>>();
 
   async create(company: ICompany): Promise<ICompany> {
     const newCompany = {
@@ -49,8 +51,26 @@ export class InMemoryCompanyRepository implements ICompanyRepository {
     return company ?? null;
   }
 
-  async findByOwnerId(ownerId: string): Promise<ICompany[]> {
-    return this.items.filter((item) => item.ownerId === ownerId);
+  private hasAccess(company: ICompany, userId: string): boolean {
+    if (company.ownerId === userId) return true;
+    return this.collaboratorUserIds.get(company.id as string)?.has(userId) ?? false;
+  }
+
+  async findAccessibleById(id: string, userId: string): Promise<ICompany | null> {
+    const company = this.items.find((item) => item.id === id);
+    if (!company || !this.hasAccess(company, userId)) return null;
+    return company;
+  }
+
+  async findAccessiblePageByUserId({ userId, limit, cursor }: ICompanyPageQuery): Promise<ICompanyPage> {
+    const ordered = this.items.filter((item) => this.hasAccess(item, userId)).sort((left, right) => {
+      const byCreatedAt = (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0);
+      return byCreatedAt || (right.id ?? '').localeCompare(left.id ?? '');
+    });
+    const cursorIndex = cursor ? ordered.findIndex((item) => item.id === cursor) : -1;
+    const pageWithExtra = ordered.slice(cursorIndex + 1, cursorIndex + 1 + limit + 1);
+    const items = pageWithExtra.slice(0, limit);
+    return { items, nextCursor: pageWithExtra.length > limit ? items.at(-1)?.id ?? null : null };
   }
 
   // 👈 Método adicionado:

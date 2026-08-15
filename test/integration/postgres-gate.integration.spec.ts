@@ -15,6 +15,7 @@ import { PrismaCompanyRepository } from '../../src/repositories/prisma-company.r
 import { ConfirmProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListProductsUseCase } from '../../src/use-cases/list-products/list-products.use-case.js';
+import { ListCompaniesUseCase } from '../../src/use-cases/list-companies/list-companies.use-case.js';
 import express from 'express';
 import { createApp } from '../../src/app.js';
 import { checkDatabaseHealth } from '../../src/infra/health.js';
@@ -809,5 +810,67 @@ describe('PostgreSQL Integration Gate', () => {
 
     const unauthorized = await auditLogRepository.findByCompanyId('no-such-company');
     expect(unauthorized).toEqual([]);
+  });
+
+  it('P1-01: GET /companies distingue owner de collaborator, isola cross-tenant e não duplica', async () => {
+    const { owner, company } = await seedOwnerAndStock();
+    const collaborator = await prisma.user.create({ data: { email: `collab-${crypto.randomUUID()}@test.local`, name: 'Collaborator', password: 'hash' } });
+    const outsider = await prisma.user.create({ data: { email: `outsider-${crypto.randomUUID()}@test.local`, name: 'Outsider', password: 'hash' } });
+    await prisma.companyCollaborator.create({ data: { companyId: company.id, userId: collaborator.id } });
+
+    const otherOwner = await prisma.user.create({ data: { email: `other-owner-${crypto.randomUUID()}@test.local`, name: 'Other Owner', password: 'hash' } });
+    const otherCompany = await prisma.company.create({
+      data: { name: 'Outra empresa', cnpj: crypto.randomUUID().replaceAll('-', '').slice(0, 14), ownerId: otherOwner.id },
+    });
+
+    const useCase = new ListCompaniesUseCase(new PrismaCompanyRepository());
+
+    const ownerPage = await useCase.execute({ userId: owner.id, limit: 50 });
+    expect(ownerPage.items.map((item) => item.id)).toEqual([company.id]);
+    expect(ownerPage.items[0]).toMatchObject({ role: 'OWNER' });
+
+    const collaboratorPage = await useCase.execute({ userId: collaborator.id, limit: 50 });
+    expect(collaboratorPage.items.map((item) => item.id)).toEqual([company.id]);
+    expect(collaboratorPage.items[0]).toMatchObject({ role: 'COLLABORATOR' });
+
+    const outsiderPage = await useCase.execute({ userId: outsider.id, limit: 50 });
+    expect(outsiderPage.items).toEqual([]);
+
+    const otherOwnerPage = await useCase.execute({ userId: otherOwner.id, limit: 50 });
+    expect(otherOwnerPage.items.map((item) => item.id)).toEqual([otherCompany.id]);
+  });
+
+  it('P1-01: GET /companies pagina por cursor com ordenação estável, rejeita cursor inacessível e resolve sem N+1', async () => {
+    const owner = await prisma.user.create({ data: { email: `owner-page-${crypto.randomUUID()}@test.local`, name: 'Owner', password: 'hash' } });
+    const outsider = await prisma.user.create({ data: { email: `outsider-page-${crypto.randomUUID()}@test.local`, name: 'Outsider', password: 'hash' } });
+    const outsiderCompany = await prisma.company.create({
+      data: { name: 'Empresa de outro dono', cnpj: crypto.randomUUID().replaceAll('-', '').slice(0, 14), ownerId: outsider.id },
+    });
+    const sameDate = new Date('2026-01-01T00:00:00Z');
+    for (let index = 0; index < 5; index += 1) {
+      await prisma.company.create({
+        data: { name: `Empresa ${index}`, cnpj: crypto.randomUUID().replaceAll('-', '').slice(0, 14), ownerId: owner.id, createdAt: sameDate },
+      });
+    }
+
+    const useCase = new ListCompaniesUseCase(new PrismaCompanyRepository());
+    const first = await useCase.execute({ userId: owner.id, limit: 2 });
+    const second = await useCase.execute({ userId: owner.id, limit: 2, cursor: first.nextCursor! });
+    const third = await useCase.execute({ userId: owner.id, limit: 2, cursor: second.nextCursor! });
+    expect([first.items.length, second.items.length, third.items.length]).toEqual([2, 2, 1]);
+    expect(third.nextCursor).toBeNull();
+    const ids = [...first.items, ...second.items, ...third.items].map((item) => item.id);
+    expect(new Set(ids).size).toBe(5);
+
+    await expect(useCase.execute({ userId: owner.id, limit: 50, cursor: 'missing-company' }))
+      .rejects.toMatchObject({ statusCode: 400 });
+    await expect(useCase.execute({ userId: owner.id, limit: 50, cursor: outsiderCompany.id }))
+      .rejects.toMatchObject({ statusCode: 400 });
+
+    const findManySpy = vi.spyOn(prisma.company, 'findMany');
+    const page = await useCase.execute({ userId: owner.id, limit: 50 });
+    expect(page.items).toHaveLength(5);
+    expect(findManySpy).toHaveBeenCalledTimes(1);
+    findManySpy.mockRestore();
   });
 });

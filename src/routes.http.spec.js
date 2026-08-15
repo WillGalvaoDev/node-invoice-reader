@@ -7,6 +7,7 @@ import { RegisterUserController } from './controllers/register-user.controller.j
 import { LoginController } from './controllers/login.controller.js';
 import { CreateCompanyController } from './controllers/create-company.controller.js';
 import { ListProductsController } from './controllers/list-products.controller.js';
+import { ListCompaniesController } from './controllers/list-companies.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
 import { ConfirmProductSuggestionController, RejectProductSuggestionController, ListPendingProductSuggestionsController, } from './controllers/product-suggestion.controllers.js';
 import { invoiceUpload } from './middlewares/invoice-upload.js';
@@ -25,6 +26,7 @@ describe('HTTP route matrix with injected use cases', () => {
     const registerUser = vi.fn();
     const login = vi.fn();
     const createCompany = vi.fn();
+    const listCompanies = vi.fn();
     const listProducts = vi.fn();
     const readInvoice = vi.fn();
     const confirmSuggestion = vi.fn();
@@ -42,6 +44,7 @@ describe('HTTP route matrix with injected use cases', () => {
                 registerUser: new RegisterUserController({ execute: registerUser }),
                 login: new LoginController({ execute: login }),
                 createCompany: new CreateCompanyController({ execute: createCompany }),
+                listCompanies: new ListCompaniesController({ execute: listCompanies }),
                 listProducts: new ListProductsController({ execute: listProducts }),
                 uploadInvoice: new UploadInvoiceController({ execute: readInvoice }, { readFile: vi.fn(), deleteFile }),
                 confirmSuggestion: new ConfirmProductSuggestionController({ execute: confirmSuggestion }),
@@ -63,6 +66,7 @@ describe('HTTP route matrix with injected use cases', () => {
         registerUser.mockResolvedValue({ id: userId, name: 'User', email: 'user@test.local' });
         login.mockResolvedValue({ token: 'jwt-token' });
         createCompany.mockResolvedValue({ company: { id: 'company-1' }, defaultStock: { id: stockId } });
+        listCompanies.mockResolvedValue({ items: [{ id: 'company-1', name: 'Empresa', cnpj: '11222333000181', createdAt: new Date('2026-01-01'), role: 'OWNER' }], nextCursor: null });
         listProducts.mockResolvedValue({ items: [{ id: 'product-1' }], nextCursor: 'next-product' });
         readInvoice.mockImplementation(async ({ filePath }) => {
             await unlink(filePath);
@@ -117,6 +121,18 @@ describe('HTTP route matrix with injected use cases', () => {
         expect(response.status).toBe(201);
         expect(createCompany).toHaveBeenCalledWith({ name: 'Empresa', cnpj: '11222333000181', ownerId: userId, requestId: 'company-request' });
     });
+    it('GET /companies encaminha identidade confiável e devolve envelope paginado', async () => {
+        const response = await fetch(`${baseUrl}/companies`);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({
+            status: 'success',
+            data: {
+                items: [{ id: 'company-1', name: 'Empresa', cnpj: '11222333000181', createdAt: '2026-01-01T00:00:00.000Z', role: 'OWNER' }],
+                nextCursor: null,
+            },
+        });
+        expect(listCompanies).toHaveBeenCalledWith({ userId, limit: 50 });
+    });
     it('GET /products encaminha paginação e devolve envelope paginado', async () => {
         const response = await fetch(`${baseUrl}/products?stockId=${stockId}&limit=2&cursor=${suggestionId}`);
         expect(response.status).toBe(200);
@@ -151,9 +167,11 @@ describe('HTTP route matrix with injected use cases', () => {
     it('prova boundaries Zod de body, query, param e command vazio antes dos use cases', async () => {
         expect((await jsonPost('/users', { name: 'X', email: 'bad', password: 'short', admin: true })).status).toBe(400);
         expect((await fetch(`${baseUrl}/products?stockId=invalid&limit=201`)).status).toBe(400);
+        expect((await fetch(`${baseUrl}/companies?limit=201`)).status).toBe(400);
         expect((await fetch(`${baseUrl}/stocks/not-uuid/suggestions`)).status).toBe(400);
         expect((await jsonPost(`/suggestions/${suggestionId}/confirm`, { productId: stockId })).status).toBe(400);
         expect(registerUser).not.toHaveBeenCalled();
+        expect(listCompanies).not.toHaveBeenCalled();
         expect(listProducts).not.toHaveBeenCalled();
         expect(listSuggestions).not.toHaveBeenCalled();
         expect(confirmSuggestion).not.toHaveBeenCalled();

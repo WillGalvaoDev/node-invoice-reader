@@ -22,6 +22,8 @@ import { JoseTokenProvider } from './providers/implementations/jose-token.provid
 // PRODUTOS
 import { ListProductsUseCase } from './use-cases/list-products/list-products.use-case.js';
 import { ListProductsController } from './controllers/list-products.controller.js';
+import { ListCompaniesUseCase } from './use-cases/list-companies/list-companies.use-case.js';
+import { ListCompaniesController } from './controllers/list-companies.controller.js';
 
 // EMPRESAS
 import { CreateCompanyUseCase } from './use-cases/create-company/create-company.use-case.js';
@@ -34,6 +36,7 @@ import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/aut
 import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
 import {
   createCompanyBodySchema,
+  listCompaniesQuerySchema,
   listProductsQuerySchema,
   loginBodySchema,
   registerUserBodySchema,
@@ -65,6 +68,7 @@ export interface CreateRoutesOptions {
     registerUser: HttpController;
     login: HttpController;
     createCompany: HttpController;
+    listCompanies: HttpController;
     listProducts: HttpController;
     uploadInvoice: HttpController;
     confirmSuggestion: HttpController;
@@ -81,6 +85,7 @@ export function createRoutes(options: CreateRoutesOptions) {
   router.post('/login', options.loginRateLimiter, validateBody(loginBodySchema), controllers.login.handle.bind(controllers.login));
   router.get('/products', options.authenticate, validateQuery(listProductsQuerySchema), controllers.listProducts.handle.bind(controllers.listProducts));
   router.post('/companies', options.authenticate, validateBody(createCompanyBodySchema), controllers.createCompany.handle.bind(controllers.createCompany));
+  router.get('/companies', options.authenticate, validateQuery(listCompaniesQuerySchema), controllers.listCompanies.handle.bind(controllers.listCompanies));
   router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
   router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
   router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
@@ -131,6 +136,7 @@ const createCompanyUseCase = new CreateCompanyUseCase(
   auditLogRepository
 );
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
+const listCompaniesController = new ListCompaniesController(new ListCompaniesUseCase(companyRepository));
 const confirmSuggestionController = new ConfirmProductSuggestionController(
   new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository),
 );
@@ -151,6 +157,7 @@ export const routes = createRoutes({
     registerUser: registerUserController,
     login: loginController,
     createCompany: createCompanyController,
+    listCompanies: listCompaniesController,
     listProducts: listProductsController,
     uploadInvoice: uploadInvoiceController,
     confirmSuggestion: confirmSuggestionController,

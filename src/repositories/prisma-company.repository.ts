@@ -1,4 +1,4 @@
-import type { ICompanyRepository, ICompany } from './company.repository.js';
+import type { ICompanyRepository, ICompany, ICompanyPage, ICompanyPageQuery } from './company.repository.js';
 import type { IStock } from './stock.repository.js';
 import { prisma } from '../infra/prisma.js';
 import { AppError } from '../errors/app-error.js';
@@ -69,13 +69,34 @@ export class PrismaCompanyRepository implements ICompanyRepository {
     return company ? CompanyMapper.toDomain(company) : null;
   }
 
-  async findByOwnerId(ownerId: string): Promise<ICompany[]> {
-    const companies = await prisma.company.findMany({
-      where: { ownerId },
-      orderBy: { createdAt: 'desc' },
+  // Predicado de autorização vive no repositório, não no use case: owner tem acesso
+  // implícito a tudo que possui; colaborador só através de CompanyCollaborator (P1-01).
+  private accessibleWhere(userId: string) {
+    return {
+      OR: [
+        { ownerId: userId },
+        { collaborators: { some: { userId } } },
+      ],
+    };
+  }
+
+  async findAccessibleById(id: string, userId: string): Promise<ICompany | null> {
+    const company = await prisma.company.findFirst({
+      where: { id, ...this.accessibleWhere(userId) },
     });
 
-    return companies.map(CompanyMapper.toDomain);
+    return company ? CompanyMapper.toDomain(company) : null;
+  }
+
+  async findAccessiblePageByUserId({ userId, limit, cursor }: ICompanyPageQuery): Promise<ICompanyPage> {
+    const companies = await prisma.company.findMany({
+      where: this.accessibleWhere(userId),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    const items = companies.slice(0, limit).map(CompanyMapper.toDomain);
+    return { items, nextCursor: companies.length > limit ? items.at(-1)?.id ?? null : null };
   }
 
   // 👈 Método adicionado:

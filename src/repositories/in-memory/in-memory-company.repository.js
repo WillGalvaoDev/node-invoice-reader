@@ -2,6 +2,8 @@ export class InMemoryCompanyRepository {
     items = [];
     stocks = [];
     failNextStockCreation = false;
+    // companyId -> Set<userId>, mesmo padrão de InMemoryStockRepository.viewAuthorizedUserIds.
+    collaboratorUserIds = new Map();
     async create(company) {
         const newCompany = {
             id: company.id ?? `company-${this.items.length + 1}`,
@@ -39,8 +41,26 @@ export class InMemoryCompanyRepository {
         const company = this.items.find((item) => item.id === id);
         return company ?? null;
     }
-    async findByOwnerId(ownerId) {
-        return this.items.filter((item) => item.ownerId === ownerId);
+    hasAccess(company, userId) {
+        if (company.ownerId === userId)
+            return true;
+        return this.collaboratorUserIds.get(company.id)?.has(userId) ?? false;
+    }
+    async findAccessibleById(id, userId) {
+        const company = this.items.find((item) => item.id === id);
+        if (!company || !this.hasAccess(company, userId))
+            return null;
+        return company;
+    }
+    async findAccessiblePageByUserId({ userId, limit, cursor }) {
+        const ordered = this.items.filter((item) => this.hasAccess(item, userId)).sort((left, right) => {
+            const byCreatedAt = (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0);
+            return byCreatedAt || (right.id ?? '').localeCompare(left.id ?? '');
+        });
+        const cursorIndex = cursor ? ordered.findIndex((item) => item.id === cursor) : -1;
+        const pageWithExtra = ordered.slice(cursorIndex + 1, cursorIndex + 1 + limit + 1);
+        const items = pageWithExtra.slice(0, limit);
+        return { items, nextCursor: pageWithExtra.length > limit ? items.at(-1)?.id ?? null : null };
     }
     // 👈 Método adicionado:
     async findByCnpj(cnpj) {

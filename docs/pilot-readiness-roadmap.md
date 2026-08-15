@@ -1,6 +1,6 @@
 # Pilot Readiness Roadmap — DocScan
 
-**Natureza:** documento de análise e planejamento. **Nenhum código de produção foi alterado nesta rodada.**
+**Natureza:** originalmente documento de análise e planejamento (r1–r3). A partir de r4, também registra o status real de execução das tarefas à medida que são implementadas — ver §17 e o status de cada tarefa concluída.
 **Fonte de verdade desta análise:** o código-fonte em `HEAD` (`9a5a7a6`), lido diretamente. Onde a documentação existente diverge do código, o código prevalece e a divergência está registrada.
 **Relação com o backlog anterior:** este roadmap é **separado** de `docs/backlog-engenharia.md` (M1–M6). Não renumera, não reabre e não substitui aquelas tarefas. Duas pendências de lá (M5-02 e as bandas de decisão de M6-02) têm aqui uma estratégia explícita de desbloqueio.
 
@@ -11,7 +11,8 @@
 | r1 | Versão inicial: 20 tarefas, P0–P6. |
 | **r2** | **(a)** Falha de similaridade promovida de risco observado para correção obrigatória pré-piloto (**P0-02**, bloqueia P6-01). **(b)** Contabilidade de gasto separada da observabilidade: **AI Budget Ledger** (autoritativo, escrita forte, fail-closed) deixa de depender do **AI Call Events** (best-effort), com reconciliação periódica (**P3-04**). **(c)** Revogação de token migrada de `passwordChangedAt` × `JWT.iat` para **`authVersion`** inteiro no JWT. Consequência: 22 tarefas e **o caminho crítico muda** — ver §8. |
 | **r3** | Decisões humanas de P0-01 aprovadas e incorporadas: **Render Free** + **Neon Free** + **sem frontend** + **cadastro por código de convite** + **Gemini Free Tier, paid budget USD 0**. P5 deixa de tratar plataforma como abstração. **O ledger muda de natureza** — de orçamento em USD para **cota de uso** (requests/tokens), preservando integralmente o contrato da r2. Kill switch separado do orçamento (`GEMINI_ENABLED`). **Uma incompatibilidade material encontrada e escalada** — ver §13-A. Contagem de tarefas inalterada: 22. |
-| **r4** | **§13-A RESOLVIDA.** Free Tier passa a ser o tier de **desenvolvimento privado**; **Paid Tier é gate operacional antes do piloto externo com DANFE real**. Consequências: P4-02 desenhado para **dois modos** (A free / B paid) com o mesmo mecanismo; P3 e P3-04 preparados para os dois estágios; novo **gate REAL-DOCUMENT AI TIER** antes de P6-01. Custo variável de IA passa a ser aceito a partir do piloto real; R$ 0 fixo permanece para Render + Neon. **P0-02 iniciada** — ver status na tarefa. |
+| **r4** | **§13-A RESOLVIDA.** Free Tier passa a ser o tier de **desenvolvimento privado**; **Paid Tier é gate operacional antes do piloto externo com DANFE real**. Consequências: P4-02 desenhado para **dois modos** (A free / B paid) com o mesmo mecanismo; P3 e P3-04 preparados para os dois estágios; novo **gate REAL-DOCUMENT AI TIER** antes de P6-01. Custo variável de IA passa a ser aceito a partir do piloto real; R$ 0 fixo permanece para Render + Neon. **P0-02 implementada e commitada** (`cfa6ca3`, TDD completo, 303/303 + Gate 31/31). |
+| **r5** | **P1-01 implementada** (não commitada nesta rodada). `GET /companies` com discovery por owner+colaborador, `role` derivado sem query extra, paginação por cursor no padrão de `/products`. `findByOwnerId` (sem chamador) removido em favor de `findAccessibleById`/`findAccessiblePageByUserId`. Suíte 303 → 315; Gate 31 → 33, com prova de ausência de N+1. |
 
 ---
 
@@ -609,6 +610,10 @@ A alternativa A é a mais conservadora disponível e a de menor superfície: ela
 
 ### P1-01 · `GET /companies` — empresas acessíveis ao usuário
 
+**Status: CONCLUÍDA em 2026-08-15.**
+
+**Evidência de validação.** RED: três specs referenciando a rota/use case/controller inexistentes falharam por módulo ausente, incluindo `routes.http.spec.ts` (o wiring de `ListCompaniesController` em `CreateRoutesOptions.controllers` é obrigatório, então o arquivo deixa de compilar sem ele — a interface força a atualização do teste). GREEN: `ICompanyRepository.findByOwnerId` (sem chamador) substituído por `findAccessibleById`/`findAccessiblePageByUserId`, com o predicado de autorização (`OR: [{ownerId}, {collaborators: {some: {userId}}}]`) vivendo no repositório — implementado em Prisma e no dublê in-memory (novo `collaboratorUserIds: Map<companyId, Set<userId>>`, mesmo padrão de `InMemoryStockRepository.viewAuthorizedUserIds`). `ListCompaniesUseCase` deriva `role` em memória, sem query adicional. Suíte unitária **303 → 315** (+12); **PostgreSQL Integration Gate 31 → 33** (+2), incluindo prova de **uma única `findMany`** independente da quantidade de empresas (`vi.spyOn(prisma.company, 'findMany')`, chamado exatamente 1 vez para 5 empresas) — evidência concreta de ausência de N+1. Validação completa: `prisma generate`/`validate` ✅ · `typecheck` limpo · `lint` 0 problemas · `build` ✅ · `verify:production` ✅ · `git diff --check` limpo. **Nenhuma migration criada** — a tarefa é de contrato e query, não de schema.
+
 **Problema.** Após o login, não existe nenhuma forma de descobrir quais empresas o usuário tem. `POST /companies` devolve a empresa criada uma única vez; perdido esse retorno, o CNPJ único impede recriar e nada permite consultar.
 
 **Objetivo.** Listar as empresas às quais o usuário autenticado tem acesso, com o papel dele em cada uma.
@@ -636,14 +641,14 @@ A alternativa A é a mais conservadora disponível e a de menor superfície: ela
 | **Impacto** | Fecha metade do único gargalo de usabilidade da API. |
 
 **Critérios de aceite.**
-1. Owner autenticado recebe 200 com suas empresas e `role: 'OWNER'`.
-2. Colaborador recebe as empresas em que colabora, com `role: 'COLLABORATOR'`.
-3. Usuário sem nenhuma empresa recebe `200` com `items: []` — nunca 404.
-4. Nenhuma empresa de outro usuário aparece em nenhuma condição.
-5. `limit`/`cursor` validados por schema; cursor de outro usuário é rejeitado com 400.
-6. `findByOwnerId` deixa de existir na interface e nos dublês (sem método órfão).
+1. [x] Owner autenticado recebe 200 com suas empresas e `role: 'OWNER'`.
+2. [x] Colaborador recebe as empresas em que colabora, com `role: 'COLLABORATOR'`.
+3. [x] Usuário sem nenhuma empresa recebe `200` com `items: []` — nunca 404.
+4. [x] Nenhuma empresa de outro usuário aparece em nenhuma condição.
+5. [x] `limit`/`cursor` validados por schema; cursor de outro usuário (ou inexistente) é rejeitado com 400.
+6. [x] `findByOwnerId` deixa de existir na interface e nos dublês (sem método órfão).
 
-**Testes esperados.** Unitário do use case com dublê in-memory (owner, colaborador, nenhum acesso, paginação, cursor inválido); teste de rota cobrindo 401 sem token e isolamento entre dois usuários; teste no PostgreSQL Integration Gate provando que o predicado `OR` não vaza entre tenants em dado real.
+**Testes esperados.** Unitário do use case com dublê in-memory (owner, colaborador, sem acesso, sem duplicidade owner+collaborator simultâneo, paginação com empate de `createdAt`, cursor inválido, ausência de campos internos na resposta); teste de controller cobrindo 401 sem `req.user`; teste de rota (`routes.http.spec.ts`) cobrindo o envelope e o boundary de `limit`; teste no PostgreSQL Integration Gate provando isolamento cross-tenant, papel correto por owner/colaborador, paginação estável e **uma única query** (`findMany` chamado 1 vez) independentemente do volume.
 
 **Fora de escopo.** Criar, editar ou remover empresa. Filtro por nome/CNPJ. Contagem de estoques ou produtos. Qualquer endpoint de colaborador.
 
@@ -1713,7 +1718,8 @@ O roadmap está concluído quando **todas** as linhas abaixo forem verdadeiras e
 
 **Portão funcional**
 
-- [ ] `GET /companies` e `GET /companies/:id/stocks` em produção, com isolamento entre tenants testado
+- [x] `GET /companies` implementada e testada (unitário, controller, rota, PostgreSQL Gate) — **falta apenas `GET /companies/:id/stocks` (P1-02) e o deploy em produção (P5)**
+- [ ] `GET /companies/:id/stocks` em produção, com isolamento entre tenants testado
 - [ ] Ciclo completo navegável pela API, **sem SQL em nenhum passo**: login → empresa → estoque → produtos → upload → sugestões → confirmar/rejeitar
 
 **Portão de correção do pipeline de IA** *(novo em r2)* — ✅ **satisfeito por P0-02 em 2026-08-15**
@@ -1889,8 +1895,8 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | # | Tarefa | Por que aqui |
 |---|---|---|
 | 1 | **P0-01** | **Majoritariamente concluída** — resta registrar em `docs/pilot-decisions.md`, resolver as 4 abertas e **levar §13-A à decisão**. O gate operacional do Gemini (projeto sem billing, limites lidos no AI Studio) entra aqui e é pré-requisito de P4-02. |
-| 2 | **P0-02** | **Única correção de defeito do roadmap.** Cada dia sem ela é um dia em que uma falha do Gemini pode sujar um catálogo. Também precede P3, para que a telemetria meça o pipeline correto. |
-| 3 | **P1-01** | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova |
+| 2 | **P0-02** ✅ | **Única correção de defeito do roadmap.** Cada dia sem ela é um dia em que uma falha do Gemini pode sujar um catálogo. Também precede P3, para que a telemetria meça o pipeline correto. Concluída, commitada (`cfa6ca3`). |
+| 3 | **P1-01** ✅ | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova. Concluída, pendente de commit desta rodada. |
 | 4 | **P1-02** | Fecha o gargalo do `stockId` e completa o ciclo pela API |
 | 5 | **P2-01** | S, segurança, sem dependência; precisa preceder a geração do segredo de produção |
 | 6 | **P5-06** | S, independente; garante que tudo daqui em diante é verificável |
@@ -1993,16 +1999,13 @@ Quinze perguntas de verificação, respondidas contra §5-A. Onde a resposta é 
 
 ## 17. Confirmação de escopo desta rodada
 
-**Nenhum código de produção foi alterado, nas três rodadas.** A r1 criou exatamente um arquivo — `docs/pilot-readiness-roadmap.md` —; a r2 (revisão) e a r3 (incorporação das decisões de P0-01) editaram **apenas esse mesmo arquivo**.
+**Estado por rodada:** r1–r3 foram documentais, tocando apenas `docs/pilot-readiness-roadmap.md`. **r4 implementou e commitou P0-02** (`cfa6ca3fb51c90066e88b03f5a2c090b46ad00f3`, na `main`, não empurrado). **r5 (esta rodada) implementou P1-01 — não commitada**, aguardando revisão do checkpoint.
 
-- Nenhum arquivo em `src/`, `prisma/`, `scripts/`, `.github/` ou na raiz foi criado, alterado ou removido.
-- Nenhuma migration foi criada.
-- Nenhuma dependência foi adicionada.
-- **Atualização r4: P0-02 foi implementada** — é a única tarefa deste roadmap com código aplicado. Ver o status na tarefa. Nenhuma outra foi iniciada.
-- **P0-01 está parcialmente concluída** porque as decisões humanas foram efetivamente tomadas — é registro de fato, não de implementação.
+- Tarefas com código aplicado até agora: **P0-02** (commitada) e **P1-01** (pendente de commit). Nenhuma outra tarefa foi iniciada.
+- **P0-01 permanece parcialmente concluída** — as decisões humanas foram tomadas (r3/r4); falta registrar `docs/pilot-decisions.md` formalmente e resolver as decisões nº 5–10 de §13 (a nº 5, máximo de itens por DANFE, é a que bloqueia P4-01).
 - Nenhum serviço foi provisionado: não há conta, projeto ou deploy criado no Render, no Neon ou no Google. As decisões estão registradas; a execução é P5.
 - Nenhum valor foi inventado para decisão em aberto: máximo de itens por DANFE, coorte, janela, retenção, `PATCH /me/password` e o prazo de guarda do `AuditLog` seguem sem número. Os limites reais do Free Tier do Gemini **não foram estimados** — são gate operacional.
-- `docs/backlog-engenharia.md`, `docs/auditoria-tecnica.md`, `docs/implementation-progress.md` e `README.md` **não foram modificados** — M5-02 e as bandas de M6-02 permanecem com o status que já tinham; este documento apenas descreve a estratégia para desbloqueá-las.
-- Nenhum commit e nenhum push foram feitos.
+- `docs/backlog-engenharia.md`, `docs/auditoria-tecnica.md`, `docs/implementation-progress.md` **não foram modificados** — M5-02 e as bandas de M6-02 permanecem com o status que já tinham; este documento apenas descreve a estratégia para desbloqueá-las. `README.md` **foi atualizado** em P0-02 e em P1-01, para refletir comportamento HTTP real (convenção do projeto: código e documentação nunca divergem).
+- **Nesta rodada (P1-01): nenhum commit e nenhum push foram feitos.** As alterações de P1-01 estão no working tree, aguardando revisão do checkpoint.
 
-O estado do repositório em relação a `HEAD` (`9a5a7a6`) é: **um arquivo novo, não rastreado, em `docs/`.**
+O estado do repositório é: `main` em `cfa6ca3` (1 commit à frente de `origin/main`, P0-02), mais o working tree desta rodada com a implementação de P1-01 não commitada.

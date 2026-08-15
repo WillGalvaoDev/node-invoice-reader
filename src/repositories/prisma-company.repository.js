@@ -61,12 +61,31 @@ export class PrismaCompanyRepository {
         });
         return company ? CompanyMapper.toDomain(company) : null;
     }
-    async findByOwnerId(ownerId) {
-        const companies = await prisma.company.findMany({
-            where: { ownerId },
-            orderBy: { createdAt: 'desc' },
+    // Predicado de autorização vive no repositório, não no use case: owner tem acesso
+    // implícito a tudo que possui; colaborador só através de CompanyCollaborator (P1-01).
+    accessibleWhere(userId) {
+        return {
+            OR: [
+                { ownerId: userId },
+                { collaborators: { some: { userId } } },
+            ],
+        };
+    }
+    async findAccessibleById(id, userId) {
+        const company = await prisma.company.findFirst({
+            where: { id, ...this.accessibleWhere(userId) },
         });
-        return companies.map(CompanyMapper.toDomain);
+        return company ? CompanyMapper.toDomain(company) : null;
+    }
+    async findAccessiblePageByUserId({ userId, limit, cursor }) {
+        const companies = await prisma.company.findMany({
+            where: this.accessibleWhere(userId),
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: limit + 1,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        const items = companies.slice(0, limit).map(CompanyMapper.toDomain);
+        return { items, nextCursor: companies.length > limit ? items.at(-1)?.id ?? null : null };
     }
     // 👈 Método adicionado:
     async findByCnpj(cnpj) {
