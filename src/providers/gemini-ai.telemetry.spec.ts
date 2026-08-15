@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const readFile = vi.hoisted(() => vi.fn());
 const generateContent = vi.hoisted(() => vi.fn());
-vi.mock('node:fs/promises', () => ({ default: { readFile }, readFile }));
 vi.mock('@google/genai', () => ({
   GoogleGenAI: class { models = { generateContent }; },
   Type: { OBJECT: 'OBJECT', STRING: 'STRING', NUMBER: 'NUMBER', ARRAY: 'ARRAY', BOOLEAN: 'BOOLEAN' },
 }));
 vi.mock('../config/env.js', () => ({
-  env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2 },
+  env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7 },
 }));
 
 const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
+
+const fileContent = Buffer.from('document');
 
 describe('GeminiAiProvider telemetry', () => {
   const recordCall = vi.fn();
@@ -24,7 +24,6 @@ describe('GeminiAiProvider telemetry', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    readFile.mockResolvedValue(Buffer.from('document'));
   });
 
   it('captura usage real, custo e latência monotônica sem estimar tokens', async () => {
@@ -36,7 +35,7 @@ describe('GeminiAiProvider telemetry', () => {
     const now = vi.fn().mockReturnValueOnce(10).mockReturnValueOnce(25);
 
     await new GeminiAiProvider({ telemetry, monotonicNow: now }).extractDanfeData(
-      'tmp/danfe', 'image/png', { requestId: 'request-123' },
+      fileContent, 'image/png', { requestId: 'request-123' },
     );
 
     expect(recordCall).toHaveBeenCalledWith({
@@ -49,7 +48,7 @@ describe('GeminiAiProvider telemetry', () => {
   it('trata usage ausente sem crash e sem fabricar contagens/custo', async () => {
     generateContent.mockResolvedValue({ text: JSON.stringify(validDanfe) });
     const now = vi.fn().mockReturnValueOnce(1).mockReturnValueOnce(2);
-    await new GeminiAiProvider({ telemetry, monotonicNow: now }).extractDanfeData('tmp/danfe', 'image/png');
+    await new GeminiAiProvider({ telemetry, monotonicNow: now }).extractDanfeData(fileContent, 'image/png');
     expect(recordCall).toHaveBeenCalledWith(expect.not.objectContaining({ inputTokens: expect.anything() }));
     expect(recordCall).toHaveBeenCalledWith(expect.not.objectContaining({ costUsdNanos: expect.anything() }));
   });
@@ -58,7 +57,7 @@ describe('GeminiAiProvider telemetry', () => {
     vi.useFakeTimers();
     generateContent.mockRejectedValue(Object.assign(new Error('provider payload'), { status: 503 }));
     const now = vi.fn().mockReturnValueOnce(5).mockReturnValueOnce(30);
-    const pending = new GeminiAiProvider({ telemetry, monotonicNow: now }).extractDanfeData('tmp/danfe', 'image/png');
+    const pending = new GeminiAiProvider({ telemetry, monotonicNow: now }).extractDanfeData(fileContent, 'image/png');
     const rejection = expect(pending).rejects.toMatchObject({ statusCode: 503 });
     await vi.runAllTimersAsync();
     await rejection;
@@ -75,7 +74,7 @@ describe('GeminiAiProvider telemetry', () => {
     generateContent
       .mockRejectedValueOnce(Object.assign(new Error('transient'), { status: 503 }))
       .mockResolvedValueOnce({ text: JSON.stringify(validDanfe) });
-    const pending = new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData('tmp/danfe', 'image/png');
+    const pending = new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData(fileContent, 'image/png');
     await vi.runAllTimersAsync();
     await expect(pending).resolves.toMatchObject({ accessKey: validDanfe.accessKey });
     expect(recordCall).toHaveBeenCalledOnce();
@@ -93,7 +92,7 @@ describe('GeminiAiProvider telemetry', () => {
   it('falha da telemetria não altera o resultado da extração', async () => {
     generateContent.mockResolvedValue({ text: JSON.stringify(validDanfe) });
     recordCall.mockImplementationOnce(() => { throw new Error('telemetry unavailable'); });
-    await expect(new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData('tmp/danfe', 'image/png'))
+    await expect(new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData(fileContent, 'image/png'))
       .resolves.toMatchObject({ accessKey: validDanfe.accessKey });
   });
 });

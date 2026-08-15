@@ -72,7 +72,7 @@ const ensureAuthenticated = createEnsureAuthenticated({ tokenProvider, userRepos
 const loginUseCase = new LoginUseCase(userRepository, hashProvider, tokenProvider);
 const loginController = new LoginController(loginUseCase);
 // INJEÇÃO - EMPRESA
-const createCompanyUseCase = new CreateCompanyUseCase(companyRepository, stockRepository, auditLogRepository);
+const createCompanyUseCase = new CreateCompanyUseCase(companyRepository, auditLogRepository);
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
 const confirmSuggestionController = new ConfirmProductSuggestionController(new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository));
 const rejectSuggestionController = new RejectProductSuggestionController(new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository));

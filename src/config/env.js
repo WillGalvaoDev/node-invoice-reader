@@ -24,6 +24,15 @@ function parseIntegerInRange(value, defaultValue, name, minimum, maximum) {
     }
     return parsed;
 }
+function parseDecimalInRange(value, defaultValue, name, minimum, maximum) {
+    if (value === undefined || value.trim() === '')
+        return defaultValue;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+        throw new Error(`Variável de ambiente inválida: ${name}`);
+    }
+    return parsed;
+}
 function parseCorsAllowedOrigins(value) {
     if (value === undefined || value.trim() === '')
         return [];
@@ -57,6 +66,8 @@ export function createEnv(environment) {
         CORS_ALLOWED_ORIGINS: parseCorsAllowedOrigins(environment.CORS_ALLOWED_ORIGINS),
         REQUEST_TIMEOUT_MS: parseIntegerInRange(environment.REQUEST_TIMEOUT_MS, 120_000, 'REQUEST_TIMEOUT_MS', 30_000, 300_000),
         SHUTDOWN_TIMEOUT_MS: parseIntegerInRange(environment.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 1_000, 120_000),
+        // Fonte única do limiar de similaridade: mesmo valor usado no prompt e na decisão em código (M6-02).
+        SIMILARITY_CONFIDENCE_THRESHOLD: parseDecimalInRange(environment.SIMILARITY_CONFIDENCE_THRESHOLD, 0.7, 'SIMILARITY_CONFIDENCE_THRESHOLD', 0, 1),
     };
 }
 export const env = createEnv(process.env);

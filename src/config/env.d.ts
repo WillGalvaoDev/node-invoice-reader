@@ -11,6 +11,7 @@ export declare function createEnv(environment: Environment): {
     CORS_ALLOWED_ORIGINS: string[];
     REQUEST_TIMEOUT_MS: number;
     SHUTDOWN_TIMEOUT_MS: number;
+    SIMILARITY_CONFIDENCE_THRESHOLD: number;
 };
 export declare const env: {
     DATABASE_URL: string;
@@ -23,6 +24,7 @@ export declare const env: {
     CORS_ALLOWED_ORIGINS: string[];
     REQUEST_TIMEOUT_MS: number;
     SHUTDOWN_TIMEOUT_MS: number;
+    SIMILARITY_CONFIDENCE_THRESHOLD: number;
 };
 export {};
 //# sourceMappingURL=env.d.ts.map

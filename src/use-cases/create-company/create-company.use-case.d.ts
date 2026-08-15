@@ -1,5 +1,5 @@
 import type { ICompanyRepository, ICompany } from '../../repositories/company.repository.js';
-import type { IStockRepository, IStock } from '../../repositories/stock.repository.js';
+import type { IStock } from '../../repositories/stock.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import { type Logger } from '../../infra/logger.js';
 interface ICreateCompanyRequest {
@@ -14,10 +14,9 @@ interface ICreateCompanyResponse {
 }
 export declare class CreateCompanyUseCase {
     private readonly companyRepository;
-    private readonly stockRepository;
     private readonly auditLogRepository;
     private readonly applicationLogger;
-    constructor(companyRepository: ICompanyRepository, stockRepository: IStockRepository, auditLogRepository: IAuditLogRepository, applicationLogger?: Logger);
+    constructor(companyRepository: ICompanyRepository, auditLogRepository: IAuditLogRepository, applicationLogger?: Logger);
     execute({ name, cnpj, ownerId, requestId }: ICreateCompanyRequest): Promise<ICreateCompanyResponse>;
 }
 export {};

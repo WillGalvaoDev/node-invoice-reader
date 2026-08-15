@@ -25,8 +25,8 @@ export declare class GeminiAiProvider implements IAiProvider {
     private parseJson;
     private parseDanfeResponse;
     private parseSimilarityResponse;
-    private fileToGenerativePart;
-    extractDanfeData(filePath: string, mimeType: DanfeMimeType, context?: {
+    private toGenerativePart;
+    extractDanfeData(content: Buffer, mimeType: DanfeMimeType, context?: {
         requestId?: string;
     }): Promise<IDanfeExtractResult>;
     findSimilarProduct(newItemDescription: string, existingProducts: IProduct[], context?: {

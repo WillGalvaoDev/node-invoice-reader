@@ -25,6 +25,7 @@ jobs:
       - run: npm run prisma:validate
       - run: npm run prisma:generate
       - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
       - run: npm run test:integration:postgres:docker
 

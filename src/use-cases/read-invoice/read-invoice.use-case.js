@@ -61,9 +61,10 @@ export class ReadInvoiceUseCase {
                 throw new AppError('Acesso não autorizado ao estoque informado.', 403);
             }
             // 1. Extrai os dados da nota fiscal via Gemini OCR
+            const fileContent = await this.storageProvider.readFile(filePath);
             const rawExtractedData = requestId
-                ? await this.aiProvider.extractDanfeData(filePath, mimeType, { requestId })
-                : await this.aiProvider.extractDanfeData(filePath, mimeType);
+                ? await this.aiProvider.extractDanfeData(fileContent, mimeType, { requestId })
+                : await this.aiProvider.extractDanfeData(fileContent, mimeType);
             let supplierCnpj;
             try {
                 supplierCnpj = parseCnpj(rawExtractedData.supplier.cnpj);

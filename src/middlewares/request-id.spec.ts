@@ -68,7 +68,7 @@ describe('request ID HTTP', () => {
 
     expect(response.status).toBe(500);
     expect(response.headers.get('x-request-id')).toBe('error-request-1');
-    await expect(response.json()).resolves.toEqual({ status: 'error', message: 'Internal server error' });
+    await expect(response.json()).resolves.toEqual({ status: 'error', message: 'Erro interno do servidor.' });
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ level: 'error', requestId: 'error-request-1', context: { error: { name: 'Error' } } });
     expect(JSON.stringify(entries)).not.toContain('internal-password-value');

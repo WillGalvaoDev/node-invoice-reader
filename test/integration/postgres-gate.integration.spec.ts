@@ -11,6 +11,7 @@ import type { IStorageProvider } from '../../src/providers/storage.provider.js';
 import type { IInvoicePersistencePlan } from '../../src/repositories/invoice-persistence.repository.js';
 import type { IProduct } from '../../src/repositories/product.repository.js';
 import { PrismaProductSuggestionRepository } from '../../src/repositories/prisma-product-suggestion.repository.js';
+import { PrismaCompanyRepository } from '../../src/repositories/prisma-company.repository.js';
 import { ConfirmProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListProductsUseCase } from '../../src/use-cases/list-products/list-products.use-case.js';
@@ -85,7 +86,25 @@ function plan(stockId: string, accessKey: string, products: IProduct[]): IInvoic
 beforeEach(cleanDatabase);
 afterAll(disconnectPrisma);
 
+async function indexNames(tableName: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ indexname: string }[]>`
+    SELECT indexname FROM pg_indexes WHERE tablename = ${tableName}
+  `;
+  return rows.map((row) => row.indexname);
+}
+
 describe('PostgreSQL Integration Gate', () => {
+  it('M5-01: índices reais de audit_logs e products existem, e o índice redundante de products foi removido', async () => {
+    const productIndexes = await indexNames('products');
+    expect(productIndexes).toContain('products_stockId_createdAt_id_idx');
+    expect(productIndexes).not.toContain('products_stockId_idx');
+    expect(productIndexes).toContain('products_stockId_code_key'); // unique (stockId, code) preservado
+
+    const auditIndexes = await indexNames('audit_logs');
+    expect(auditIndexes).toContain('audit_logs_companyId_createdAt_idx');
+    expect(auditIndexes).toContain('audit_logs_userId_createdAt_idx');
+  });
+
   it('expõe health público baseado em SELECT 1 real no PostgreSQL', async () => {
     const app = createApp({ applicationRoutes: express.Router(), healthProbe: checkDatabaseHealth });
     const server = await new Promise<import('node:http').Server>((resolve, reject) => {
@@ -147,7 +166,7 @@ describe('PostgreSQL Integration Gate', () => {
       async extractDanfeData() { return extracted; },
       async findSimilarProduct() { similarityCalls += 1; return null; },
     };
-    const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
+    const storage: IStorageProvider = { async readFile() { return Buffer.alloc(0); }, async deleteFile() {} };
     const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
 
     await expect(useCase.execute({ filePath: 'incoherent', mimeType: 'image/png', stockId: stock.id, userId: owner.id }))
@@ -226,7 +245,7 @@ describe('PostgreSQL Integration Gate', () => {
       async extractDanfeData() { return extracted; },
       async findSimilarProduct() { return { product: { ...product(stock.id, candidate.code, 10), id: candidate.id }, confidence: 0.88, reason: 'equivalente' }; },
     };
-    const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
+    const storage: IStorageProvider = { async readFile() { return Buffer.alloc(0); }, async deleteFile() {} };
     const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
 
     const result = await useCase.execute({ filePath: 'pending-file', mimeType: 'image/png', stockId: stock.id, userId: owner.id });
@@ -586,7 +605,7 @@ describe('PostgreSQL Integration Gate', () => {
       async extractDanfeData() { aiCalls += 1; return extracted; },
       async findSimilarProduct() { return null; },
     };
-    const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
+    const storage: IStorageProvider = { async readFile() { return Buffer.alloc(0); }, async deleteFile() {} };
     const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
 
     await expect(useCase.execute({ filePath: 'controlled-test-file', mimeType: 'image/png', stockId: stock.id, userId: outsider.id })).rejects.toMatchObject({ statusCode: 403 });
@@ -615,7 +634,7 @@ describe('PostgreSQL Integration Gate', () => {
     const ai: IAiProvider = {
       async extractDanfeData() { return extracted; }, async findSimilarProduct() { return null; },
     };
-    const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
+    const storage: IStorageProvider = { async readFile() { return Buffer.alloc(0); }, async deleteFile() {} };
     const useCase = new ReadInvoiceUseCase(
       storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(),
       new PrismaStockRepository(), persistence,
@@ -657,7 +676,7 @@ describe('PostgreSQL Integration Gate', () => {
       async extractDanfeData() { return extracted; },
       async findSimilarProduct() { return null; },
     };
-    const storage: IStorageProvider = { async readFile() { return ''; }, async deleteFile() {} };
+    const storage: IStorageProvider = { async readFile() { return Buffer.alloc(0); }, async deleteFile() {} };
     const failingAudit = {
       create: vi.fn().mockRejectedValue(new Error('controlled audit failure')),
       findByCompanyId: vi.fn(),
@@ -694,5 +713,101 @@ describe('PostgreSQL Integration Gate', () => {
     expect(Number(persisted.quantity)).toBe(15);
     expect(Number(persisted.unitPrice)).toBe(10);
     expect(failingAudit.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('createWithDefaultStock: rollback real quando a segunda escrita (Stock) falha na mesma transação', async () => {
+    const owner = await prisma.user.create({
+      data: { email: `owner-${crypto.randomUUID()}@test.local`, name: 'Owner', password: 'test-hash' },
+    });
+    const companyRepository = new PrismaCompanyRepository();
+    const cnpj = '04252011000110';
+
+    // NUL byte é um valor de string TypeScript válido, mas o PostgreSQL rejeita em colunas de texto
+    // (invalid byte sequence for encoding "UTF8": 0x00) — força uma falha real na segunda escrita (Stock),
+    // depois que a primeira (Company) já foi executada dentro da mesma transação.
+    await expect(companyRepository.createWithDefaultStock(
+      { name: 'Empresa Atômica', cnpj, ownerId: owner.id },
+      'Estoque Principal\u0000',
+    )).rejects.toThrow();
+
+    expect(await prisma.company.count({ where: { cnpj } })).toBe(0);
+    expect(await prisma.stock.count({ where: { company: { ownerId: owner.id } } })).toBe(0);
+  });
+
+  it('createWithDefaultStock: permite retry bem-sucedido com a mesma identidade após rollback anterior', async () => {
+    const owner = await prisma.user.create({
+      data: { email: `owner-${crypto.randomUUID()}@test.local`, name: 'Owner', password: 'test-hash' },
+    });
+    const companyRepository = new PrismaCompanyRepository();
+    const cnpj = '12ABC34501DE35';
+
+    await expect(companyRepository.createWithDefaultStock(
+      { name: 'Empresa Atômica', cnpj, ownerId: owner.id },
+      'Estoque Principal\u0000',
+    )).rejects.toThrow();
+    expect(await prisma.company.count({ where: { cnpj } })).toBe(0);
+
+    const { company, stock } = await companyRepository.createWithDefaultStock(
+      { name: 'Empresa Atômica', cnpj, ownerId: owner.id },
+      'Estoque Principal',
+    );
+
+    expect(company.id).toEqual(expect.any(String));
+    expect(stock.name).toBe('Estoque Principal');
+    expect(stock.companyId).toBe(company.id);
+    expect(await prisma.company.count({ where: { cnpj } })).toBe(1);
+    expect(await prisma.stock.count({ where: { companyId: stock.companyId } })).toBe(1);
+  });
+
+  it('createWithDefaultStock: traduz P2002 real de CNPJ duplicado sem deixar Stock órfão', async () => {
+    const owner = await prisma.user.create({
+      data: { email: `owner-${crypto.randomUUID()}@test.local`, name: 'Owner', password: 'test-hash' },
+    });
+    const companyRepository = new PrismaCompanyRepository();
+    const cnpj = '11444777000161';
+
+    const first = await companyRepository.createWithDefaultStock(
+      { name: 'Original', cnpj, ownerId: owner.id },
+      'Estoque Principal',
+    );
+
+    await expect(companyRepository.createWithDefaultStock(
+      { name: 'Duplicada', cnpj, ownerId: owner.id },
+      'Estoque Principal',
+    )).rejects.toMatchObject({ statusCode: 409 });
+
+    expect(await prisma.company.count({ where: { cnpj } })).toBe(1);
+    expect(await prisma.stock.count({ where: { companyId: first.stock.companyId } })).toBe(1);
+  });
+
+  it('M6-04: AuditLogMapper traduz enum, Json e nulos reais do Postgres em findByCompanyId/findByUserId', async () => {
+    const { owner, company, stock } = await seedOwnerAndStock();
+    const auditLogRepository = new PrismaAuditLogRepository();
+
+    await auditLogRepository.create({
+      action: 'UPDATE', entity: 'PRODUCT', entityId: 'product-1',
+      userId: owner.id, companyId: company.id, stockId: stock.id,
+      description: 'Entrada de estoque processada por invoice.',
+      previousState: { quantity: 10, unitPrice: 5, totalPrice: 50 },
+      newState: { quantity: 15, unitPrice: 10, totalPrice: 150 },
+    });
+    await auditLogRepository.create({ action: 'UNAUTHORIZED_ACCESS', entity: 'INVOICE' });
+
+    const byCompany = await auditLogRepository.findByCompanyId(company.id);
+    expect(byCompany).toHaveLength(1);
+    expect(byCompany[0]).toMatchObject({
+      action: 'UPDATE', entity: 'PRODUCT', entityId: 'product-1',
+      userId: owner.id, companyId: company.id, stockId: stock.id,
+      previousState: { quantity: 10, unitPrice: 5, totalPrice: 50 },
+      newState: { quantity: 15, unitPrice: 10, totalPrice: 150 },
+      createdAt: expect.any(Date),
+    });
+
+    const byUser = await auditLogRepository.findByUserId(owner.id);
+    expect(byUser).toHaveLength(1);
+    expect(byUser[0]?.id).toBe(byCompany[0]?.id);
+
+    const unauthorized = await auditLogRepository.findByCompanyId('no-such-company');
+    expect(unauthorized).toEqual([]);
   });
 });

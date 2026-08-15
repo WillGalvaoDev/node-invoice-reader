@@ -16,7 +16,7 @@ vi.mock('./middlewares/upload-rate-limiter.js', () => ({
   uploadRateLimiter: (_request: unknown, _response: unknown, next: () => void) => next(),
 }));
 vi.mock('./config/env.js', () => ({
-  env: { DATABASE_URL: 'postgresql://localhost/docscan', JWT_SECRET: 'secret', GEMINI_API_KEY: 'key', PORT: 3333 },
+  env: { DATABASE_URL: 'postgresql://localhost/docscan', JWT_SECRET: 'secret', GEMINI_API_KEY: 'key', PORT: 3333, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7 },
 }));
 
 const { routes } = await import('./routes.js');

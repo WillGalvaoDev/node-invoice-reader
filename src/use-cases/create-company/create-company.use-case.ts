@@ -1,10 +1,12 @@
 import type { ICompanyRepository, ICompany } from '../../repositories/company.repository.js';
-import type { IStockRepository, IStock } from '../../repositories/stock.repository.js';
+import type { IStock } from '../../repositories/stock.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import { AppError } from '../../errors/app-error.js';
 import { logger, type Logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
 import { parseCnpj } from '../../domain/cnpj.js';
+
+const DEFAULT_STOCK_NAME = 'Estoque Principal';
 
 interface ICreateCompanyRequest {
   name: string;
@@ -21,7 +23,6 @@ interface ICreateCompanyResponse {
 export class CreateCompanyUseCase {
   constructor(
     private readonly companyRepository: ICompanyRepository,
-    private readonly stockRepository: IStockRepository,
     private readonly auditLogRepository: IAuditLogRepository,
     private readonly applicationLogger: Logger = logger,
   ) {}
@@ -43,24 +44,17 @@ export class CreateCompanyUseCase {
       throw new AppError('Já existe uma empresa cadastrada com este CNPJ.', 409);
     }
 
-    // 1. Cria a Empresa
-    const company = await this.companyRepository.create({
-      name,
-      cnpj: canonicalCnpj,
-      ownerId,
-    });
+    // 1. Cria a Empresa e o Estoque Principal em uma única transação atômica
+    const { company, stock: defaultStock } = await this.companyRepository.createWithDefaultStock(
+      { name, cnpj: canonicalCnpj, ownerId },
+      DEFAULT_STOCK_NAME,
+    );
 
-    if (!company.id) {
+    if (!company.id || !defaultStock.id) {
       throw new AppError('Erro ao criar a empresa.', 500);
     }
 
-    // 2. Cria automaticamente o Estoque Principal vinculado à Empresa
-    const defaultStock = await this.stockRepository.create({
-      name: 'Estoque Principal',
-      companyId: company.id,
-    });
-
-    // 3. Registra o Log de Auditoria
+    // 2. Registra o Log de Auditoria
     await persistAuditBestEffort({
       repository: this.auditLogRepository,
       logger: this.applicationLogger,
