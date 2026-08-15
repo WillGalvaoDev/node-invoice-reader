@@ -28,7 +28,7 @@ vi.mock('./middlewares/auth-rate-limiters.js', () => ({
   userRegistrationRateLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 vi.mock('./config/env.js', () => ({
-  env: { DATABASE_URL: 'postgresql://localhost/test', JWT_SECRET: 'test', GEMINI_API_KEY: 'test', PORT: 3333, TRUST_PROXY_HOPS: 0 },
+  env: { DATABASE_URL: 'postgresql://localhost/test', JWT_SECRET: 'test', GEMINI_API_KEY: 'test', PORT: 3333, TRUST_PROXY_HOPS: 0, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7 },
 }));
 
 const { routes } = await import('./routes.js');

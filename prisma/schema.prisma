@@ -123,7 +123,7 @@ model Product {
   similaritySuggestions ProductSimilaritySuggestion[] @relation("SuggestedProduct")
 
   @@unique([stockId, code])
-  @@index([stockId])
+  @@index([stockId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("products")
 }
 
@@ -188,5 +188,8 @@ model AuditLog {
   stock   Stock?   @relation(fields: [stockId], references: [id], onDelete: SetNull)
   user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  // Cobrem exatamente os métodos reais IAuditLogRepository.findByCompanyId/findByUserId (where + orderBy createdAt desc).
+  @@index([companyId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }

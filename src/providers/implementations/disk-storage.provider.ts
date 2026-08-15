@@ -3,9 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export class DiskStorageProvider implements IStorageProvider {
-  async readFile(path: string): Promise<string> {
-    // Interacting with Libuv under the hood
-    return await fs.readFile(path, 'utf-8');
+  async readFile(filePath: string): Promise<Buffer> {
+    return await fs.readFile(filePath);
   }
 
   async deleteFile(filePath: string): Promise<void> {

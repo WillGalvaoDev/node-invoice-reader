@@ -128,7 +128,6 @@ const loginController = new LoginController(loginUseCase);
 // INJEÇÃO - EMPRESA
 const createCompanyUseCase = new CreateCompanyUseCase(
   companyRepository,
-  stockRepository,
   auditLogRepository
 );
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);

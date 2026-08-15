@@ -2,14 +2,13 @@ import { AppError } from '../../errors/app-error.js';
 import { logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
 import { parseCnpj } from '../../domain/cnpj.js';
+const DEFAULT_STOCK_NAME = 'Estoque Principal';
 export class CreateCompanyUseCase {
     companyRepository;
-    stockRepository;
     auditLogRepository;
     applicationLogger;
-    constructor(companyRepository, stockRepository, auditLogRepository, applicationLogger = logger) {
+    constructor(companyRepository, auditLogRepository, applicationLogger = logger) {
         this.companyRepository = companyRepository;
-        this.stockRepository = stockRepository;
         this.auditLogRepository = auditLogRepository;
         this.applicationLogger = applicationLogger;
     }
@@ -28,21 +27,12 @@ export class CreateCompanyUseCase {
         if (companyWithSameCnpj) {
             throw new AppError('Já existe uma empresa cadastrada com este CNPJ.', 409);
         }
-        // 1. Cria a Empresa
-        const company = await this.companyRepository.create({
-            name,
-            cnpj: canonicalCnpj,
-            ownerId,
-        });
-        if (!company.id) {
+        // 1. Cria a Empresa e o Estoque Principal em uma única transação atômica
+        const { company, stock: defaultStock } = await this.companyRepository.createWithDefaultStock({ name, cnpj: canonicalCnpj, ownerId }, DEFAULT_STOCK_NAME);
+        if (!company.id || !defaultStock.id) {
             throw new AppError('Erro ao criar a empresa.', 500);
         }
-        // 2. Cria automaticamente o Estoque Principal vinculado à Empresa
-        const defaultStock = await this.stockRepository.create({
-            name: 'Estoque Principal',
-            companyId: company.id,
-        });
-        // 3. Registra o Log de Auditoria
+        // 2. Registra o Log de Auditoria
         await persistAuditBestEffort({
             repository: this.auditLogRepository,
             logger: this.applicationLogger,

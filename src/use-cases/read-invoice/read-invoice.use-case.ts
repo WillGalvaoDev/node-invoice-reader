@@ -91,9 +91,10 @@ export class ReadInvoiceUseCase {
       }
 
       // 1. Extrai os dados da nota fiscal via Gemini OCR
+      const fileContent = await this.storageProvider.readFile(filePath);
       const rawExtractedData = requestId
-        ? await this.aiProvider.extractDanfeData(filePath, mimeType, { requestId })
-        : await this.aiProvider.extractDanfeData(filePath, mimeType);
+        ? await this.aiProvider.extractDanfeData(fileContent, mimeType, { requestId })
+        : await this.aiProvider.extractDanfeData(fileContent, mimeType);
 
       let supplierCnpj: string;
       try {

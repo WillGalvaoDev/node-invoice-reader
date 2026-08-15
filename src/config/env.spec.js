@@ -34,6 +34,7 @@ describe('configuração da aplicação', () => {
             CORS_ALLOWED_ORIGINS: [],
             REQUEST_TIMEOUT_MS: 120_000,
             SHUTDOWN_TIMEOUT_MS: 30_000,
+            SIMILARITY_CONFIDENCE_THRESHOLD: 0.7,
         });
     });
     it('valida os limites operacionais de request e shutdown', async () => {
@@ -88,6 +89,24 @@ describe('configuração da aplicação', () => {
         expect(createEnv({ ...required, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
         expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '-1' })).toThrow('TRUST_PROXY_HOPS');
         expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '11' })).toThrow('TRUST_PROXY_HOPS');
+    });
+    it('centraliza o limiar de confiança de similaridade com default 0.7 e valida a faixa 0-1', async () => {
+        const { createEnv } = await import('./env.js');
+        const required = {
+            DATABASE_URL: 'postgresql://localhost/docscan',
+            JWT_SECRET: 'jwt-secret',
+            GEMINI_API_KEY: 'gemini-key',
+        };
+        expect(createEnv(required).SIMILARITY_CONFIDENCE_THRESHOLD).toBe(0.7);
+        expect(createEnv({ ...required, SIMILARITY_CONFIDENCE_THRESHOLD: '0.85' }).SIMILARITY_CONFIDENCE_THRESHOLD).toBe(0.85);
+        expect(createEnv({ ...required, SIMILARITY_CONFIDENCE_THRESHOLD: '0' }).SIMILARITY_CONFIDENCE_THRESHOLD).toBe(0);
+        expect(createEnv({ ...required, SIMILARITY_CONFIDENCE_THRESHOLD: '1' }).SIMILARITY_CONFIDENCE_THRESHOLD).toBe(1);
+        expect(() => createEnv({ ...required, SIMILARITY_CONFIDENCE_THRESHOLD: '-0.01' }))
+            .toThrow('SIMILARITY_CONFIDENCE_THRESHOLD');
+        expect(() => createEnv({ ...required, SIMILARITY_CONFIDENCE_THRESHOLD: '1.01' }))
+            .toThrow('SIMILARITY_CONFIDENCE_THRESHOLD');
+        expect(() => createEnv({ ...required, SIMILARITY_CONFIDENCE_THRESHOLD: 'abc' }))
+            .toThrow('SIMILARITY_CONFIDENCE_THRESHOLD');
     });
     it('normaliza uma allowlist CORS e usa lista vazia como default seguro', async () => {
         const { createEnv } = await import('./env.js');

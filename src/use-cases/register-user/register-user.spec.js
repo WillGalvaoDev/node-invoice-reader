@@ -1,27 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { RegisterUserUseCase } from './register-user.use-case.js';
-// 1. Mock do Repositório em Memória
-class InMemoryUserRepository {
-    items = [];
-    async create(user) {
-        const newUser = {
-            id: 'user-id-mock',
-            email: user.email,
-            name: user.name,
-            createdAt: new Date()
-        };
-        this.items.push({ ...newUser, password: user.password });
-        return newUser;
-    }
-    async findByEmail(email) {
-        const user = this.items.find(item => item.email === email);
-        return user || null;
-    }
-    async findById(id) {
-        const user = this.items.find(item => item.id === id);
-        return user || null;
-    }
-}
+import { InMemoryUserRepository } from '../../repositories/in-memory/in-memory-user.repository.js';
 // 2. Mock do Provedor de Hash (Evita processar criptografia real nos testes unitários)
 class FakeHashProvider {
     async generateHash(payload) {
@@ -76,6 +55,12 @@ describe('Register User Use Case', () => {
             email: 'duplicate@example.com',
             password: 'password123'
         })).rejects.toMatchObject({ name: 'AppError', statusCode: 409 });
+    });
+    it('atribui IDs distintos a usuários distintos (dublê compartilhado, sem ID fixo)', async () => {
+        const first = await sut.execute({ name: 'John Doe', email: 'john@example.com', password: 'password123' });
+        const second = await sut.execute({ name: 'Jane Doe', email: 'jane@example.com', password: 'password123' });
+        expect(first.id).not.toBe(second.id);
+        expect(userRepository.items).toHaveLength(2);
     });
 });
 //# sourceMappingURL=register-user.spec.js.map

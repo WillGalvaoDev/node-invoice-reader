@@ -2,6 +2,7 @@ import type { IStockRepository, IStock } from './stock.repository.js';
 import { prisma } from '../infra/prisma.js';
 import { AppError } from '../errors/app-error.js';
 import { isPrismaErrorCode } from '../errors/prisma-error.js';
+import { StockMapper } from '../mappers/stock.mapper.js';
 
 export class PrismaStockRepository implements IStockRepository {
   async create(stock: IStock): Promise<IStock> {
@@ -23,7 +24,7 @@ export class PrismaStockRepository implements IStockRepository {
       throw error;
     }
 
-    return createdStock as IStock;
+    return StockMapper.toDomain(createdStock);
   }
 
   async findById(id: string): Promise<IStock | null> {
@@ -31,7 +32,7 @@ export class PrismaStockRepository implements IStockRepository {
       where: { id },
     });
 
-    return stock as IStock | null;
+    return stock ? StockMapper.toDomain(stock) : null;
   }
 
   async findByIdForUser(id: string, userId: string): Promise<IStock | null> {
@@ -56,7 +57,7 @@ export class PrismaStockRepository implements IStockRepository {
       },
     });
 
-    return stock as IStock | null;
+    return stock ? StockMapper.toDomain(stock) : null;
   }
 
   async findByIdForViewer(id: string, userId: string): Promise<IStock | null> {
@@ -78,7 +79,7 @@ export class PrismaStockRepository implements IStockRepository {
         },
       },
     });
-    return stock as IStock | null;
+    return stock ? StockMapper.toDomain(stock) : null;
   }
 
   async findByCompanyId(companyId: string): Promise<IStock[]> {
@@ -87,6 +88,6 @@ export class PrismaStockRepository implements IStockRepository {
       orderBy: { createdAt: 'desc' },
     });
 
-    return stocks as IStock[];
+    return stocks.map(StockMapper.toDomain);
   }
 }

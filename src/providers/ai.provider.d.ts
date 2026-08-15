@@ -28,7 +28,7 @@ export interface ISimilarityMatch {
     reason: string;
 }
 export interface IAiProvider {
-    extractDanfeData(filePath: string, mimeType: DanfeMimeType, context?: {
+    extractDanfeData(content: Buffer, mimeType: DanfeMimeType, context?: {
         requestId?: string;
     }): Promise<IDanfeExtractResult>;
     findSimilarProduct(newItemDescription: string, existingProducts: IProduct[], context?: {

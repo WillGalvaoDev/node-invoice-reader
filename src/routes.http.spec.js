@@ -76,16 +76,38 @@ describe('HTTP route matrix with injected use cases', () => {
     const jsonPost = (path, body) => fetch(`${baseUrl}${path}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
-    it('POST /users é público, valida e encaminha body ao use case', async () => {
+    it('POST /users é público, valida, encaminha body ao use case e devolve o envelope padrão', async () => {
         const response = await jsonPost('/users', { name: 'User Name', email: 'USER@Test.Local', password: 'password123' });
         expect(response.status).toBe(201);
         expect(registerUser).toHaveBeenCalledWith({ name: 'User Name', email: 'user@test.local', password: 'password123' });
+        await expect(response.json()).resolves.toEqual({
+            status: 'success',
+            data: { id: userId, name: 'User', email: 'user@test.local' },
+        });
     });
-    it('POST /login é público e devolve o contrato atual', async () => {
+    it('POST /users traduz conflito de e-mail duplicado do use case para 409 via AppError (regressão M6-01)', async () => {
+        registerUser.mockRejectedValueOnce(new AppError('Já existe um usuário cadastrado com este email.', 409));
+        const response = await jsonPost('/users', { name: 'User Name', email: 'dup@test.local', password: 'password123' });
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+            status: 'error',
+            message: 'Já existe um usuário cadastrado com este email.',
+        });
+    });
+    it('POST /login é público e devolve o envelope padrão', async () => {
         const response = await jsonPost('/login', { email: 'user@test.local', password: 'password123' });
         expect(response.status).toBe(200);
-        await expect(response.json()).resolves.toEqual({ token: 'jwt-token' });
+        await expect(response.json()).resolves.toEqual({ status: 'success', data: { token: 'jwt-token' } });
         expect(login).toHaveBeenCalledOnce();
+    });
+    it('POST /login traduz credenciais inválidas do use case para 401 via AppError', async () => {
+        login.mockRejectedValueOnce(new AppError('E-mail ou senha inválidos.', 401));
+        const response = await jsonPost('/login', { email: 'user@test.local', password: 'wrong-password' });
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toEqual({
+            status: 'error',
+            message: 'E-mail ou senha inválidos.',
+        });
     });
     it('POST /companies encaminha identidade confiável, body e request ID', async () => {
         const response = await fetch(`${baseUrl}/companies`, {

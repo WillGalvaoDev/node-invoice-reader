@@ -1,24 +1,20 @@
 import { describe, beforeEach, it, expect, vi } from 'vitest';
 import { CreateCompanyUseCase } from './create-company.use-case.js';
 import { InMemoryCompanyRepository } from '../../repositories/in-memory/in-memory-company.repository.js';
-import { InMemoryStockRepository } from '../../repositories/in-memory/in-memory-stock.repository.js';
 import { InMemoryAuditLogRepository } from '../../repositories/in-memory/in-memory-audit-log.repository.js';
 import { AppError } from '../../errors/app-error.js';
 
 describe('CreateCompanyUseCase', () => {
   let companyRepository: InMemoryCompanyRepository;
-  let stockRepository: InMemoryStockRepository;
   let auditLogRepository: InMemoryAuditLogRepository;
   let sut: CreateCompanyUseCase;
 
   beforeEach(() => {
     companyRepository = new InMemoryCompanyRepository();
-    stockRepository = new InMemoryStockRepository();
     auditLogRepository = new InMemoryAuditLogRepository();
 
     sut = new CreateCompanyUseCase(
       companyRepository,
-      stockRepository,
       auditLogRepository
     );
   });
@@ -52,6 +48,18 @@ describe('CreateCompanyUseCase', () => {
       previousState: null,
       newState: { companyId: response.company.id, defaultStockId: response.defaultStock.id },
     });
+  });
+
+  it('não deixa company órfã quando a criação do estoque padrão falha (unidade atômica)', async () => {
+    companyRepository.failNextStockCreation = true;
+
+    await expect(sut.execute({ name: 'Empresa Órfã', cnpj: '11222333000181', ownerId: 'user-1' }))
+      .rejects.toThrow('Simulated stock creation failure');
+
+    expect(companyRepository.items).toHaveLength(0);
+    expect(companyRepository.stocks).toHaveLength(0);
+    expect(await companyRepository.findByCnpj('11222333000181')).toBeNull();
+    expect(auditLogRepository.items).toHaveLength(0);
   });
 
   it('não deve ser possível criar uma empresa sem nome', async () => {
@@ -117,7 +125,7 @@ describe('CreateCompanyUseCase', () => {
       findByUserId: vi.fn(),
     };
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const useCase = new CreateCompanyUseCase(companyRepository, stockRepository, failingAudit, logger);
+    const useCase = new CreateCompanyUseCase(companyRepository, failingAudit, logger);
 
     const result = await useCase.execute({
       name: 'Empresa Audit Isolado', cnpj: '04252011000110', ownerId: 'user-1', requestId: 'company-request',

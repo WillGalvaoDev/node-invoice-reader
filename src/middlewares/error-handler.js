@@ -21,7 +21,7 @@ export function createErrorHandler(logger) {
         });
         return response.status(500).json({
             status: 'error',
-            message: 'Internal server error',
+            message: 'Erro interno do servidor.',
         });
     };
 }

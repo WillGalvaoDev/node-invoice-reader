@@ -46,6 +46,7 @@ vi.mock('./config/env.js', () => ({
         JWT_SECRET: 'jwt-secret',
         GEMINI_API_KEY: 'gemini-key',
         PORT: 3333,
+        SIMILARITY_CONFIDENCE_THRESHOLD: 0.7,
     },
 }));
 const { routes } = await import('./routes.js');

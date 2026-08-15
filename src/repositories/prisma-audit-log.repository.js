@@ -1,4 +1,5 @@
 import { prisma } from '../infra/prisma.js';
+import { AuditLogMapper } from '../mappers/audit-log.mapper.js';
 export class PrismaAuditLogRepository {
     async create(log) {
         const data = {
@@ -16,21 +17,21 @@ export class PrismaAuditLogRepository {
         const createdLog = await prisma.auditLog.create({
             data,
         });
-        return createdLog;
+        return AuditLogMapper.toDomain(createdLog);
     }
     async findByCompanyId(companyId) {
         const logs = await prisma.auditLog.findMany({
             where: { companyId },
             orderBy: { createdAt: 'desc' },
         });
-        return logs;
+        return logs.map(AuditLogMapper.toDomain);
     }
     async findByUserId(userId) {
         const logs = await prisma.auditLog.findMany({
             where: { userId },
             orderBy: { createdAt: 'desc' },
         });
-        return logs;
+        return logs.map(AuditLogMapper.toDomain);
     }
 }
 //# sourceMappingURL=prisma-audit-log.repository.js.map

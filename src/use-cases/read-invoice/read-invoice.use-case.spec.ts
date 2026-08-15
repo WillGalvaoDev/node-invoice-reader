@@ -54,7 +54,7 @@ describe('ReadInvoiceUseCase', () => {
 
   beforeEach(() => {
     storageProviderMock = {
-      readFile: vi.fn(),
+      readFile: vi.fn().mockResolvedValue(Buffer.from('mock-file-content')),
       deleteFile: vi.fn().mockResolvedValue(undefined)
     } as unknown as Mocked<IStorageProvider>;
 
@@ -124,7 +124,8 @@ describe('ReadInvoiceUseCase', () => {
 
     const result = await sut.execute({ filePath, mimeType: 'image/jpeg', stockId, userId });
 
-    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(filePath, 'image/jpeg');
+    expect(storageProviderMock.readFile).toHaveBeenCalledWith(filePath);
+    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(Buffer.from('mock-file-content'), 'image/jpeg');
     expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
 
     expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations[0]).toEqual({
@@ -439,7 +440,8 @@ describe('ReadInvoiceUseCase', () => {
     await sut.execute({ filePath: '/path/owner.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'owner-1' });
 
     expect(stockRepositoryMock.findByIdForUser).toHaveBeenCalledWith('stock-1', 'owner-1');
-    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith('/path/owner.png', 'image/png');
+    expect(storageProviderMock.readFile).toHaveBeenCalledWith('/path/owner.png');
+    expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(Buffer.from('mock-file-content'), 'image/png');
     expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
   });
 

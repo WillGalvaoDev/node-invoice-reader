@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const readFile = vi.hoisted(() => vi.fn());
 const generateContent = vi.hoisted(() => vi.fn());
-vi.mock('node:fs/promises', () => ({ default: { readFile }, readFile }));
 vi.mock('@google/genai', () => ({
     GoogleGenAI: class {
         models = { generateContent };
@@ -9,9 +7,10 @@ vi.mock('@google/genai', () => ({
     Type: { OBJECT: 'OBJECT', STRING: 'STRING', NUMBER: 'NUMBER', ARRAY: 'ARRAY', BOOLEAN: 'BOOLEAN' },
 }));
 vi.mock('../config/env.js', () => ({
-    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2 },
+    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7 },
 }));
 const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
+const fileContent = Buffer.from('document');
 describe('GeminiAiProvider file MIME', () => {
     const validDanfe = {
         accessKey: '1'.repeat(44), invoiceNumber: '1', series: '1', issuedAt: '2026-01-01', totalValue: 10,
@@ -20,21 +19,18 @@ describe('GeminiAiProvider file MIME', () => {
     };
     beforeEach(() => {
         vi.useRealTimers();
-        readFile.mockReset();
         generateContent.mockReset();
-        readFile.mockResolvedValue(Buffer.from('document'));
         generateContent.mockResolvedValue({ text: JSON.stringify(validDanfe) });
     });
-    it.each(['image/jpeg', 'image/png', 'application/pdf'])('envia bytes de %s com o MIME recebido', async (mimeType) => {
-        await new GeminiAiProvider().extractDanfeData('tmp/hash-without-extension', mimeType);
-        expect(readFile).toHaveBeenCalledWith('tmp/hash-without-extension');
+    it.each(['image/jpeg', 'image/png', 'application/pdf'])('envia bytes de %s com o MIME recebido, sem tocar o disco', async (mimeType) => {
+        await new GeminiAiProvider().extractDanfeData(fileContent, mimeType);
         expect(generateContent.mock.calls[0]?.[0].contents[0].parts[1].inlineData).toEqual({
-            data: Buffer.from('document').toString('base64'),
+            data: fileContent.toString('base64'),
             mimeType,
         });
     });
     it('separa instrucoes confiaveis do documento nao confiavel na extracao', async () => {
-        await new GeminiAiProvider().extractDanfeData('tmp/hash', 'application/pdf');
+        await new GeminiAiProvider().extractDanfeData(fileContent, 'application/pdf');
         const request = generateContent.mock.calls[0]?.[0];
         const systemInstruction = request.config.systemInstruction;
         expect(systemInstruction.toLowerCase()).toContain('conteudo nao confiavel');
@@ -46,20 +42,14 @@ describe('GeminiAiProvider file MIME', () => {
                 role: 'user',
                 parts: [
                     { text: 'UNTRUSTED_DOCUMENT_ATTACHMENT' },
-                    { inlineData: { data: Buffer.from('document').toString('base64'), mimeType: 'application/pdf' } },
+                    { inlineData: { data: fileContent.toString('base64'), mimeType: 'application/pdf' } },
                 ],
             }]);
     });
-    it('rejeita MIME desconhecido sem fallback para JPEG nem chamada externa', async () => {
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'application/zip'))
+    it('rejeita MIME desconhecido sem chamada externa', async () => {
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'application/zip'))
             .rejects.toMatchObject({ statusCode: 415 });
-        expect(readFile).not.toHaveBeenCalled();
         expect(generateContent).not.toHaveBeenCalled();
-    });
-    it('nao usa readFileSync no provider', async () => {
-        const fs = await vi.importActual('node:fs/promises');
-        const source = await fs.readFile(new URL('./gemini-ai.provider.ts', import.meta.url), 'utf8');
-        expect(source).not.toContain('readFileSync');
     });
     it('cancela cada tentativa no timeout e rejeita sem espera indefinida', async () => {
         vi.useFakeTimers();
@@ -68,7 +58,7 @@ describe('GeminiAiProvider file MIME', () => {
             observedSignals.push(config.abortSignal);
             config.abortSignal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
         }));
-        const pending = new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png');
+        const pending = new GeminiAiProvider().extractDanfeData(fileContent, 'image/png');
         const assertion = expect(pending).rejects.toMatchObject({ statusCode: 504 });
         await vi.runAllTimersAsync();
         await assertion;
@@ -81,7 +71,7 @@ describe('GeminiAiProvider file MIME', () => {
         generateContent
             .mockRejectedValueOnce({ status, message: 'upstream detail' })
             .mockResolvedValueOnce({ text: JSON.stringify(validDanfe) });
-        const pending = new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png');
+        const pending = new GeminiAiProvider().extractDanfeData(fileContent, 'image/png');
         await vi.runAllTimersAsync();
         await expect(pending).resolves.toMatchObject({ accessKey: validDanfe.accessKey });
         expect(generateContent).toHaveBeenCalledTimes(2);
@@ -89,7 +79,7 @@ describe('GeminiAiProvider file MIME', () => {
     it('respeita o limite de tentativas para falha transitória', async () => {
         vi.useFakeTimers();
         generateContent.mockRejectedValue({ status: 503, message: 'sensitive upstream body' });
-        const pending = new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png');
+        const pending = new GeminiAiProvider().extractDanfeData(fileContent, 'image/png');
         const assertion = expect(pending).rejects.toMatchObject({
             statusCode: 503,
             message: expect.not.stringContaining('sensitive upstream body'),
@@ -106,7 +96,7 @@ describe('GeminiAiProvider file MIME', () => {
             vi.spyOn(console, 'info').mockImplementation(() => undefined),
         ];
         generateContent.mockRejectedValueOnce({ status: 401, message: 'api-key-value' });
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png')).rejects.toMatchObject({
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png')).rejects.toMatchObject({
             statusCode: 502,
             message: expect.not.stringContaining('api-key-value'),
         });
@@ -121,14 +111,14 @@ describe('GeminiAiProvider file MIME', () => {
         ['JSON malformado', '{"products":'],
     ])('mapeia %s para erro previsível sem retry', async (_case, text) => {
         generateContent.mockResolvedValueOnce({ text });
-        const error = await new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png').catch((caught) => caught);
+        const error = await new GeminiAiProvider().extractDanfeData(fileContent, 'image/png').catch((caught) => caught);
         expect(error).toMatchObject({ statusCode: 422 });
         expect(error).not.toBeInstanceOf(SyntaxError);
         expect(generateContent).toHaveBeenCalledOnce();
     });
     it('rejeita estrutura minima incompatível', async () => {
         generateContent.mockResolvedValueOnce({ text: JSON.stringify({ accessKey: '1'.repeat(44), products: {} }) });
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
             .rejects.toMatchObject({ statusCode: 422 });
         expect(generateContent).toHaveBeenCalledOnce();
     });
@@ -138,7 +128,7 @@ describe('GeminiAiProvider file MIME', () => {
                 extraRoot: 'ignored',
                 products: [{ ...validDanfe.products[0], extraItem: 'ignored' }],
             }) });
-        const result = await new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png');
+        const result = await new GeminiAiProvider().extractDanfeData(fileContent, 'image/png');
         expect(result.issuedAt).toBeInstanceOf(Date);
         expect(result).not.toHaveProperty('extraRoot');
         expect(result.products[0]).not.toHaveProperty('extraItem');
@@ -147,12 +137,12 @@ describe('GeminiAiProvider file MIME', () => {
         generateContent.mockResolvedValueOnce({ text: JSON.stringify({
                 ...validDanfe, supplier: { ...validDanfe.supplier, cnpj: '12.abc.345/01de-35' },
             }) });
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
             .resolves.toMatchObject({ supplier: { cnpj: '12ABC34501DE35' } });
         generateContent.mockResolvedValueOnce({ text: JSON.stringify({
                 ...validDanfe, supplier: { ...validDanfe.supplier, cnpj: '12.ABC.345/01DE-34' },
             }) });
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
             .rejects.toMatchObject({ statusCode: 422 });
     });
     it.each([
@@ -162,13 +152,13 @@ describe('GeminiAiProvider file MIME', () => {
         ['accessKey fora do contrato', { ...validDanfe, accessKey: '123' }],
     ])('rejeita DANFE estruturalmente inválido: %s', async (_case, payload) => {
         generateContent.mockResolvedValueOnce({ text: JSON.stringify(payload) });
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
             .rejects.toMatchObject({ statusCode: 422 });
     });
     it('rejeita Infinity produzido por número JSON fora da faixa finita', async () => {
         const payload = JSON.stringify(validDanfe).replace('"totalValue":10', '"totalValue":1e999');
         generateContent.mockResolvedValueOnce({ text: payload });
-        await expect(new GeminiAiProvider().extractDanfeData('tmp/hash', 'image/png'))
+        await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
             .rejects.toMatchObject({ statusCode: 422 });
     });
     it('preserva matching valido e degrada resposta invalida para null sem retry', async () => {

@@ -25,7 +25,7 @@ afterEach(async () => {
 describe('createEnsureAuthenticated', () => {
   const verifyToken = vi.fn();
   const findById = vi.fn();
-  const protectedHandler = vi.fn((request: express.Request, response: express.Response) => response.json({ userId: request.user.id }));
+  const protectedHandler = vi.fn((request: express.Request, response: express.Response) => response.json({ userId: request.user!.id }));
 
   beforeEach(() => {
     vi.clearAllMocks();

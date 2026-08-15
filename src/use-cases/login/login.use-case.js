@@ -1,3 +1,4 @@
+import { AppError } from '../../errors/app-error.js';
 export class LoginUseCase {
     userRepository;
     hashProvider;
@@ -12,13 +13,13 @@ export class LoginUseCase {
         const user = await this.userRepository.findByEmail(email);
         // Mensagem genérica por segurança para evitar enumeração de contas
         if (!user) {
-            throw new Error('Invalid email or password.');
+            throw new AppError('E-mail ou senha inválidos.', 401);
         }
         // 2. Compara se o hash da senha confere (Protegendo a senha real)
         // Tratamos a possibilidade de a propriedade password não vir na interface básica
         const isPasswordValid = await this.hashProvider.compareHash(password, user.password ?? '');
         if (!isPasswordValid) {
-            throw new Error('Invalid email or password.');
+            throw new AppError('E-mail ou senha inválidos.', 401);
         }
         // 3. Gera o token JWT abstraído
         const token = await this.tokenProvider.generateToken({

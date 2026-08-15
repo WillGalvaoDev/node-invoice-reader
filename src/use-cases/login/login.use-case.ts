@@ -1,6 +1,7 @@
 import type { IUserRepository } from '../../repositories/user.repository.js';
 import type { IHashProvider } from '../../providers/hash.provider.js';
 import type { ITokenProvider } from '../../providers/token.provider.js';
+import { AppError } from '../../errors/app-error.js';
 
 interface ILoginRequest {
   email: string;
@@ -24,7 +25,7 @@ export class LoginUseCase {
 
     // Mensagem genérica por segurança para evitar enumeração de contas
     if (!user) {
-      throw new Error('Invalid email or password.');
+      throw new AppError('E-mail ou senha inválidos.', 401);
     }
 
     // 2. Compara se o hash da senha confere (Protegendo a senha real)
@@ -35,7 +36,7 @@ export class LoginUseCase {
     );
 
     if (!isPasswordValid) {
-      throw new Error('Invalid email or password.');
+      throw new AppError('E-mail ou senha inválidos.', 401);
     }
 
     // 3. Gera o token JWT abstraído

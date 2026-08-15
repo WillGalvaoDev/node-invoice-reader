@@ -1,25 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LoginUseCase } from './login.use-case.js';
-import type { IUserRepository, IUser } from '../../repositories/user.repository.js';
 import type { IHashProvider } from '../../providers/hash.provider.js';
 import type { ITokenProvider, ITokenPayload } from '../../providers/token.provider.js';
-
-// Reutilizando/Criando Mocks rápidos para o ambiente isolado
-class InMemoryUserRepository implements IUserRepository {
-  public items: IUser[] = [];
-
-  async create(user: Omit<IUser, 'id' | 'createdAt'> & { password: string }): Promise<IUser> {
-    const newUser: IUser = { id: 'user-1', email: user.email, name: user.name };
-    this.items.push({ ...newUser, password: user.password });
-    return newUser;
-  }
-  async findByEmail(email: string): Promise<IUser | null> {
-    return this.items.find(item => item.email === email) || null;
-  }
-  async findById(id: string): Promise<IUser | null> {
-    return this.items.find(item => item.id === id) || null;
-  }
-}
+import { AppError } from '../../errors/app-error.js';
+import { InMemoryUserRepository } from '../../repositories/in-memory/in-memory-user.repository.js';
 
 class FakeHashProvider implements IHashProvider {
   async generateHash(payload: string): Promise<string> { return `${payload}-hashed`; }
@@ -32,7 +16,7 @@ class FakeTokenProvider implements ITokenProvider {
   async generateToken(payload: ITokenPayload): Promise<string> {
     return `mocked-jwt-token-for-${payload.sub}`;
   }
-  async verifyToken(token: string): Promise<ITokenPayload | null> {
+  async verifyToken(_token: string): Promise<ITokenPayload | null> {
     return { sub: 'user-1', email: 'john@example.com' };
   }
 }
@@ -79,6 +63,24 @@ describe('Login Use Case', () => {
         email: 'john@example.com',
         password: 'wrong-password',
       })
-    ).rejects.toBeInstanceOf(Error);
+    ).rejects.toMatchObject({ name: 'AppError', statusCode: 401 });
+  });
+
+  it('não deve ser possível autenticar com e-mail inexistente', async () => {
+    await expect(
+      sut.execute({
+        email: 'unknown@example.com',
+        password: 'password123',
+      })
+    ).rejects.toBeInstanceOf(AppError);
+  });
+
+  it('suporta múltiplos usuários com identidades distintas (dublê compartilhado, sem ID fixo)', async () => {
+    await userRepository.create({ name: 'Jane Doe', email: 'jane@example.com', password: 'jane-secret-hashed' });
+
+    const janeResponse = await sut.execute({ email: 'jane@example.com', password: 'jane-secret' });
+
+    expect(janeResponse.token).toContain('mocked-jwt-token-for-user-2');
+    expect(janeResponse.token).not.toContain('user-1');
   });
 });

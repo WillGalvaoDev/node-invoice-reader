@@ -1,6 +1,7 @@
 import type { AuditAction, Prisma } from '@prisma/client';
 import type { IAuditLogRepository, IAuditLog } from './audit-log.repository.js';
 import { prisma } from '../infra/prisma.js';
+import { AuditLogMapper } from '../mappers/audit-log.mapper.js';
 
 export class PrismaAuditLogRepository implements IAuditLogRepository {
   async create(log: IAuditLog): Promise<IAuditLog> {
@@ -20,7 +21,7 @@ export class PrismaAuditLogRepository implements IAuditLogRepository {
       data,
     });
 
-    return createdLog as IAuditLog;
+    return AuditLogMapper.toDomain(createdLog);
   }
 
   async findByCompanyId(companyId: string): Promise<IAuditLog[]> {
@@ -29,7 +30,7 @@ export class PrismaAuditLogRepository implements IAuditLogRepository {
       orderBy: { createdAt: 'desc' },
     });
 
-    return logs as IAuditLog[];
+    return logs.map(AuditLogMapper.toDomain);
   }
 
   async findByUserId(userId: string): Promise<IAuditLog[]> {
@@ -38,6 +39,6 @@ export class PrismaAuditLogRepository implements IAuditLogRepository {
       orderBy: { createdAt: 'desc' },
     });
 
-    return logs as IAuditLog[];
+    return logs.map(AuditLogMapper.toDomain);
   }
 }

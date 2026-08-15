@@ -1,6 +1,7 @@
 import { prisma } from '../infra/prisma.js';
 import { AppError } from '../errors/app-error.js';
 import { isPrismaErrorCode } from '../errors/prisma-error.js';
+import { StockMapper } from '../mappers/stock.mapper.js';
 export class PrismaStockRepository {
     async create(stock) {
         let createdStock;
@@ -21,13 +22,13 @@ export class PrismaStockRepository {
             }
             throw error;
         }
-        return createdStock;
+        return StockMapper.toDomain(createdStock);
     }
     async findById(id) {
         const stock = await prisma.stock.findUnique({
             where: { id },
         });
-        return stock;
+        return stock ? StockMapper.toDomain(stock) : null;
     }
     async findByIdForUser(id, userId) {
         const stock = await prisma.stock.findFirst({
@@ -50,7 +51,7 @@ export class PrismaStockRepository {
                 },
             },
         });
-        return stock;
+        return stock ? StockMapper.toDomain(stock) : null;
     }
     async findByIdForViewer(id, userId) {
         const stock = await prisma.stock.findFirst({
@@ -71,14 +72,14 @@ export class PrismaStockRepository {
                 },
             },
         });
-        return stock;
+        return stock ? StockMapper.toDomain(stock) : null;
     }
     async findByCompanyId(companyId) {
         const stocks = await prisma.stock.findMany({
             where: { companyId },
             orderBy: { createdAt: 'desc' },
         });
-        return stocks;
+        return stocks.map(StockMapper.toDomain);
     }
 }
 //# sourceMappingURL=prisma-stock.repository.js.map

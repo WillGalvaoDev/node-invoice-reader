@@ -125,7 +125,7 @@ Introduzir no `IStockRepository` o método que relaciona estoque e usuário, e s
 
 **Descrição**
 Substituir o `read-modify-write` do saldo por operação atômica (`increment` / `upsert` sobre a chave composta) e envolver o processamento de uma nota em transação única, separando a fase de extração/decisão (fora da transação, com IA) da fase de persistência (dentro).
-*Itens de origem: 3.1, 2.1*
+*Itens de origem: 3.1, 2.1 (parcial — escopo de produto/invoice; a metade de empresa+estoque do finding 2.1 foi corrigida em [[M3-09]])*
 
 | | |
 |---|---|
@@ -535,7 +535,31 @@ Usar a chave composta no lookup por código e mapear `P2002`/`P2003` para `AppEr
 
 ---
 
-**Saída do Milestone 3:** validada. Custo médio ponderado concorrente, ciclo humano de similarity, CNPJ numérico/alfanumérico, auditoria de domínio, ownership/paginação, coerência do DANFE, preservação de description e tradução de constraints Prisma foram concluídos. **Milestone 3 concluído em 2026-08-13.**
+### M3-09 · Tornar criação de empresa + estoque atômica
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** `ICompanyRepository.createWithDefaultStock` cria `Company` e o `Stock` padrão dentro de uma única `prisma.$transaction`, sem client Prisma adicional. RED reproduziu a órfã com o design anterior (duas escritas via `companyRepository.create` + `stockRepository.create`): stock falhando deixava `company-1` persistida. GREEN: `CreateCompanyUseCase` passou a depender só de `ICompanyRepository` + `IAuditLogRepository` (o parâmetro `stockRepository`, agora morto, foi removido do construtor e da injeção em `routes.ts`); traduções `P2002`/`P2003` preservadas. PostgreSQL Integration Gate (efêmero, 8 migrations) provou rollback real forçando uma falha genuína de encoding UTF-8 na segunda escrita (nome do estoque com um byte NUL, rejeitado pelo PostgreSQL) após a primeira já ter sido executada na mesma transação: nem `Company` nem `Stock` restaram; retry subsequente com a mesma identidade teve sucesso; e duplicidade de CNPJ continuou traduzida para `409` sem `Stock` órfão. Testes focados: 8/8 (unitário) + 3 novos cenários PostgreSQL; suíte completa: 269/269; gate PostgreSQL: 29/29; typecheck, build, `prisma validate`, `verify:production` e `git diff --check` aprovados.
+
+**Descrição**
+`CreateCompanyUseCase` criava `Company` e `Stock` em duas escritas independentes. Se a criação do `Stock` falhasse, a `Company` ficava órfã e, como `cnpj` é `UNIQUE`, o retry subsequente batia em `409` sem que o usuário tivesse qualquer caminho pela API para sair desse estado. Corrigido criando as duas entidades em uma única transação atômica.
+*Origem: finding 2.1 da auditoria técnica — atribuído a M1-05 mas cobria apenas a metade da transação da invoice, deixando a metade da empresa sem tarefa própria.*
+
+| | |
+|---|---|
+| **Dependências** | M1-02 |
+| **Esforço** | **S** |
+| **Risco** | **Baixo** — aditivo à unidade de trabalho já existente (`prisma.$transaction`); não introduz client Prisma novo |
+| **Prioridade** | **P1** |
+| **Impacto** | Elimina o único estado remanescente do sistema irreparável pela própria API (empresa órfã de estoque, CNPJ preso em `409` permanente). |
+
+---
+
+**Correção de atribuição (M1-05):** o campo "Itens de origem" de M1-05 citava `3.1, 2.1`, mas a implementação de M1-05 cobre apenas a transação da nota fiscal (finding 3.1). O finding 2.1 relativo à criação de empresa+estoque não tinha tarefa própria até M3-09; a referência a `2.1` em M1-05 deve ser lida como parcial (upsert/transação de produto), não como cobertura de `CreateCompanyUseCase`.
+
+---
+
+**Saída do Milestone 3:** validada. Custo médio ponderado concorrente, ciclo humano de similarity, CNPJ numérico/alfanumérico, auditoria de domínio, ownership/paginação, coerência do DANFE, preservação de description, tradução de constraints Prisma e criação atômica de empresa+estoque foram concluídos. **Milestone 3 concluído em 2026-08-14.**
 
 ---
 
@@ -687,7 +711,27 @@ Testar a aplicação com o valor padrão do Prisma no ambiente-alvo, verificando
 
 ---
 
-**Saída do Milestone 4:** portão de produção fechado. O sistema pode ser implantado, reiniciado sem perda, observado e alterado com regressão. Milestone 4 concluído e validado em 2026-08-14 — todas as tarefas (M4-01 a M4-07) aprovadas, incluindo CI remoto em `ubuntu-latest` via GitHub Actions.
+### M4-08 · Alinhar lint com o Definition of Done
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** ESLint 10 (flat config, `eslint.config.js`) com `typescript-eslint` 8 aplicado a `src/**/*.ts`, `test/**/*.ts` e `*.ts` via `projectService`, mais `@eslint/js recommended` para os dois scripts `.mjs` hand-authored. Base `tseslint.configs.recommended` (sem type-checking) evita o ruído de `unbound-method`/`no-unsafe-assignment`/`require-await` que o preset `recommendedTypeChecked` completo gerava em mocks de teste (346 problemas, descartado por violar "sem regras cosméticas excessivas"). Duas regras type-aware foram adicionadas deliberadamente — `no-floating-promises` e `no-misused-promises` — por serem a classe exata de defeito que motivou M1-01 (promise rejeitada sem chegar ao error handler); ambas rodaram limpas contra o código de produção atual (zero violações), confirmando que a correção de M1-01 se sustenta. `no-explicit-any` permanece ligada para código de produção (zero violações hoje) e desligada apenas para `**/*.spec.ts`/`test/**`, onde `as any` em dublês leves de `Request`/`Response` é o padrão idiomático já estabelecido no projeto — reescrevê-los seria reforma de estilo fora de escopo. Das 30 violações reais encontradas na primeira passada, 29 eram `no-explicit-any` em specs (escopo ajustado) e 6 `no-undef` de `process` nos scripts `.mjs` (globals Node declarados); a única violação genuína de produção corrigida foi um parâmetro não utilizado em `login.spec.ts` (`token` → `_token`). CI (`ci.yml`, job `verify`) passou a rodar `npm run lint` entre `typecheck` e a suíte. Suíte completa: 269/269; typecheck, build, `prisma validate`, `verify:production` e `git diff --check` aprovados.
+
+**Descrição**
+`CLAUDE.md` exige "lint limpo" no Definition of Done, mas o projeto não declarava script de lint. Adicionado lint real (ESLint + typescript-eslint) em vez de relaxar a exigência, por não haver impedimento técnico.
+*Origem: lacuna identificada nesta sessão de verificação de estado (Definition of Done vs. `package.json`), não um finding numerado da auditoria original.*
+
+| | |
+|---|---|
+| **Dependências** | nenhuma |
+| **Esforço** | **S** |
+| **Risco** | **Baixo** — aditivo; nenhuma regra alterou comportamento de runtime |
+| **Prioridade** | **P1** |
+| **Impacto** | Fecha a divergência entre o checklist obrigatório do CLAUDE.md e o `package.json` real. As duas regras type-aware ligadas (`no-floating-promises`, `no-misused-promises`) funcionam como rede de regressão permanente contra a classe de defeito de M1-01. |
+
+---
+
+**Saída do Milestone 4:** portão de produção fechado. O sistema pode ser implantado, reiniciado sem perda, observado e alterado com regressão. Milestone 4 concluído e validado em 2026-08-14 — todas as tarefas (M4-01 a M4-08) aprovadas, incluindo CI remoto em `ubuntu-latest` via GitHub Actions.
 
 ---
 
@@ -700,6 +744,12 @@ Testar a aplicação com o valor padrão do Prisma no ambiente-alvo, verificando
 ---
 
 ### M5-01 · Índices e política de retenção da auditoria
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** levantamento de todas as queries reais em `src/repositories/prisma-*.repository.ts` contra `AuditLog`, `Product`, `Company` e `Stock` antes de qualquer alteração. Resultado: `ICompanyRepository.findByOwnerId` e `IStockRepository.findByCompanyId` não têm nenhum chamador em use case ou controller (busca completa por `companyRepository.findByOwnerId`/`stockRepository.findByCompanyId` fora de repositório/spec: zero ocorrências) — nenhum índice foi criado para eles, e `Stock` já tem cobertura implícita via `@@unique([companyId, name])` para o caso de precisarem no futuro. `IAuditLogRepository.findByCompanyId`/`findByUserId` são métodos reais, testados e parte da interface pública (`where: { companyId|userId }, orderBy: { createdAt: 'desc' }`), mas `audit_logs` não tinha nenhum índice além da PK apesar de receber uma linha por praticamente toda escrita de domínio (M3-04) — ganharam `@@index([companyId, createdAt(sort: Desc)])` e `@@index([userId, createdAt(sort: Desc)])`. Em `Product`, a consulta paginada real e exposta via HTTP (`GET /products` → `findPageByStockId`: `where: { stockId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]`) tinha apenas `@@index([stockId])`, insuficiente para servir o `ORDER BY` sem sort adicional; substituído (não empilhado, para evitar índice redundante) por `@@index([stockId, createdAt(sort: Desc), id(sort: Desc)])`, que continua servindo sozinho o filtro simples por `stockId` usado em `findByStockId` (prefiltro de similaridade). O índice único `(stockId, code)` não foi tocado. Migration hand-authored (`20260814180000_add_audit_and_product_indexes`) com `DROP INDEX`/`CREATE INDEX` normais — sem `CONCURRENTLY`: ambiente é pré-lançamento (calibração "Volume MVP" do topo deste documento), sem tráfego real a proteger contra lock; revisitar com `CONCURRENTLY` quando houver volume de produção. PostgreSQL Integration Gate validou via `pg_indexes` real que `products_stockId_createdAt_id_idx` existe, `products_stockId_idx` foi removido, `products_stockId_code_key` (unique) preservado, e os dois índices de `audit_logs` existem. Suíte completa: 269/269; gate PostgreSQL: 30/30 em duas execuções (8 → 9 migrations); typecheck, lint, build, `prisma validate`, `verify:production` e `git diff --check` aprovados. Nenhuma dependência nova.
+
+**Retenção:** sem requisito de negócio ou legal definido nas calibrações do time para prazo de retenção fiscal/auditoria (decisão de negócio real, não inferível do código — não deve ser adivinhada). Decisão conservadora documentada: **nenhuma exclusão automática foi implementada.** `AuditLog` é dado de trilha de auditoria/compliance para um domínio fiscal brasileiro; apagar cedo demais é risco maior que o custo de armazenamento no volume atual. Particionamento avaliado e **descartado por ora** — não há evidência de volume que o justifique (mesma régua de M5, "orientado por dados reais de uso"). Revisitar com input jurídico/negócio sobre prazo legal de guarda antes de implementar qualquer purga.
 
 **Descrição**
 Criar índices compostos `(fk, createdAt)` nas consultas reais de auditoria, produto e empresa, e definir retenção/particionamento do `AuditLog`.
@@ -717,6 +767,12 @@ Criar índices compostos `(fk, createdAt)` nas consultas reais de auditoria, pro
 
 ### M5-02 · Otimizar a chamada de similaridade
 
+**Status:** BLOCKED BY REAL USAGE DATA em 2026-08-14. Nenhuma alteração de código foi feita.
+
+**Motivo do bloqueio:** M5-02 depende explicitamente dos dados de M4-04 para comparar qualidade de matching antes/depois em vez de assumir equivalência. Verificado: `IAiTelemetry` (`src/infra/ai-telemetry.ts`) grava apenas linhas de log estruturado via `logger.info` — não há backend de métricas, agregação, dashboard ou store consultável (busca por Prometheus/Datadog/Grafana no projeto: nenhuma ocorrência). Mais importante: **o sistema ainda não foi implantado em produção** — todo dado de telemetria existente hoje vem de execuções de teste/CI, não de volume real de notas fiscais. Não há, portanto, número médio/p95 de chamadas `product_similarity` por invoice, taxa de falha, distribuição de confidence nem taxa de aceitação/rejeição reais para basear a decisão de consolidar N chamadas em uma chamada em lote — decisão que a própria tarefa classifica como risco médio por alterar qualidade de matching.
+
+**Decisão:** não implementado. Alterar a estratégia de matching por custo teórico, sem dado real, seria trocar um risco conhecido (N chamadas, qualidade validada) por um risco desconhecido (lote, qualidade não comparada) — exatamente o que a tarefa instrui a evitar. Reavaliar quando houver volume real de produção instrumentado por M4-04.
+
 **Descrição**
 Consolidar as N chamadas por nota em chamada única em lote, sobre os candidatos já reduzidos por M2-05.
 *Itens de origem: 4.2 (restante)*
@@ -731,6 +787,10 @@ Consolidar as N chamadas por nota em chamada única em lote, sobre os candidatos
 
 ---
 
+**Saída do Milestone 5:** parcial. M5-01 concluída e validada em 2026-08-14 (índices reais + retenção documentada). M5-02 permanece `BLOCKED BY REAL USAGE DATA` — o sistema ainda não está em produção, não há telemetria real de volume/qualidade de matching para basear a consolidação em lote sem trocar um risco conhecido por um desconhecido. Reavaliar quando houver dado real de M4-04.
+
+---
+
 ---
 
 # Milestone 6 — Refatorações
@@ -740,6 +800,12 @@ Consolidar as N chamadas por nota em chamada única em lote, sobre os candidatos
 ---
 
 ### M6-01 · Unificar convenções de erro e envelope de resposta
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** localizados exatamente os dois endpoints com `Error` cru e comparação de string em `error.message` no controller: `LoginController`/`LoginUseCase` e `RegisterUserController`/`RegisterUserUseCase`. Reprodução isolada confirmou um bug real e ativo antes da correção: `RegisterUserUseCase` já lançava `AppError('Já existe um usuário cadastrado com este email.', 409)` desde uma migração anterior, mas o controller comparava contra o texto antigo em inglês (`'User already exists.'`) — a comparação nunca casava, e todo cadastro de e-mail duplicado retornava `500` em vez de `409`, silenciosamente, sem nenhum teste de rota cobrindo esse caminho. `LoginUseCase` passou a lançar `AppError('E-mail ou senha inválidos.', 401)` em vez de `Error` cru; ambos os controllers tiveram o `try/catch` removido e agora propagam `AppError` para o error handler global (mesmo padrão de `CreateCompanyController`/`ListProductsController`/`ProductSuggestionControllers`), com sucesso padronizado em `{ status: 'success', data }`. RED: reprodução isolada do controller antes da correção confirmou `500` com e-mail duplicado. Testes novos/atualizados: envelope de sucesso de `/login` e `/users`, regressão de `/users` com e-mail duplicado devolvendo `409` real através do handler global, regressão de `/login` com credenciais inválidas devolvendo `401`, e teste unitário de `LoginUseCase` fortalecido para `AppError`/`401` em vez de `Error` genérico. Suíte completa: 272/272; gate PostgreSQL: 30/30; typecheck, lint, build, `verify:production` e `git diff --check` aprovados.
+
+**Mudança de contrato HTTP (documentada):** `POST /login` (sucesso) passou de `{ token }` para `{ status: 'success', data: { token } }`; `POST /users` (sucesso) passou de retornar o objeto de usuário cru para `{ status: 'success', data: user }`. Erros de ambos os endpoints passaram a seguir o envelope padrão do error handler global (`{ status: 'error', message }`) em vez de `{ error: message }` custom. Não há cliente externo consumindo essa API hoje (pré-lançamento); a mudança alinha os dois últimos endpoints divergentes ao padrão já usado em todos os outros.
 
 **Descrição**
 Migrar os dois endpoints que usam `Error` cru com comparação de string no controller para `AppError` com handler global, e padronizar o formato de sucesso e de erro.
@@ -757,6 +823,12 @@ Migrar os dois endpoints que usam `Error` cru com comparação de string no cont
 
 ### M6-02 · Limiar de confiança configurável e bandas de decisão
 
+**Status:** Concluída em 2026-08-14 (parcial — ver nota abaixo). Bandas de decisão não implementadas.
+
+**Evidência de validação:** `env.SIMILARITY_CONFIDENCE_THRESHOLD` (`src/config/env.ts`) é agora a fonte única, validada na faixa `[0, 1]` com default `0.7` (o mesmo valor vigente — não alterado). `SIMILARITY_SYSTEM_INSTRUCTION` interpola `env.SIMILARITY_CONFIDENCE_THRESHOLD.toFixed(2)` em vez de ter "0.70" hardcoded no texto do prompt; a decisão em código usa `parsed.confidence < env.SIMILARITY_CONFIDENCE_THRESHOLD` em vez do literal `0.7`. Teste dedicado (`gemini-ai.similarity-threshold.spec.ts`) usa um limiar deliberadamente diferente do default (0.85) para provar de ponta a ponta que o prompt interpolado e a decisão de match/no-match derivam da mesma fonte configurada — não de dois `0.70` hardcoded que poderiam divergir. `.env.example` documenta a variável com aviso explícito para não alterar o valor sem dado real. Suíte completa: 275/275; typecheck, lint, build, `prisma validate`, `verify:production` e `git diff --check` aprovados. Nenhuma migration necessária (configuração de aplicação, não de schema).
+
+**Nota de escopo:** "bandas de decisão" do título não foram implementadas — o backlog já instrui **não inventar thresholds novos sem dados reais**, e M5-02 (que dependeria dos mesmos dados de M4-04) está `BLOCKED BY REAL USAGE DATA`. Implementar bandas (ex.: faixas de confiança com tratamento distinto) sem volume real seria a mesma troca de arbitrário por arbitrário que a tarefa original adverte contra. Escopo entregue: fonte única configurável, sem alterar o valor nem inventar bandas.
+
 **Descrição**
 Extrair o limiar duplicado (hoje escrito no prompt e no código) para constante única e configurável.
 *Itens de origem: 5.1*
@@ -772,6 +844,10 @@ Extrair o limiar duplicado (hoje escrito no prompt e no código) para constante 
 ---
 
 ### M6-03 · Ajustar o contrato do provider de armazenamento
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** confirmado que `IStorageProvider.readFile` nunca era chamado em código de produção — `GeminiAiProvider.fileToGenerativePart` lia o arquivo diretamente via `fs.readFile(filePath)`, ignorando a abstração de storage inteiramente (o acoplamento oculto a disco que o finding 7.3 descreve). `IStorageProvider.readFile` passou a retornar `Promise<Buffer>` (a assinatura antiga declarava `Promise<string>`, que já estava errada para conteúdo binário — imagem/PDF decodificado como UTF-8 corrompe bytes; nunca se manifestou porque o método nunca era chamado). `DiskStorageProvider.readFile` usa `fs.readFile(path)` sem encoding. `IAiProvider.extractDanfeData` e `GeminiAiProvider` passaram a receber `content: Buffer` em vez de `filePath: string`; `fileToGenerativePart` foi renomeado para `toGenerativePart` e não toca mais o filesystem. `ReadInvoiceUseCase` agora chama `this.storageProvider.readFile(filePath)` **depois** do gate de autorização (preserva "403 antes de qualquer I/O", inclusive leitura de disco) e repassa o mesmo buffer para a IA, sem cópia adicional. Teste novo (`disk-storage.provider.spec.ts`, inexistente antes desta tarefa) prova leitura binary-safe com bytes fora da faixa UTF-8 válida e ausência de `readFileSync`/`node:fs` síncrono — a invariante de leitura assíncrona de M1-07 migrou para onde o disco é de fato tocado agora. Suíte completa: 277/277; gate PostgreSQL: 30/30; typecheck, lint, build, `verify:production` e `git diff --check` aprovados. Nenhuma migration necessária; nenhuma dependência nova.
 
 **Descrição**
 Fazer o storage entregar bytes e o provider de IA receber conteúdo e mimetype em vez de caminho, removendo o método declarado e nunca chamado.
@@ -789,6 +865,10 @@ Fazer o storage entregar bytes e o provider de IA receber conteúdo e mimetype e
 
 ### M6-04 · Corrigir tipagem de `req.user` e substituir asserções por mappers
 
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** `Express.Request.user` passou de obrigatório para opcional em `src/@types/express.d.ts`. O `tsc --noEmit` sob `strict` não acusou nenhum ponto de produção acessando `request.user.id`/`req.user.id` sem `?.` — os controllers já praticavam a checagem defensiva por convenção (confirmando o diagnóstico da auditoria); os dois únicos pontos que precisaram de ajuste foram um teste (`ensure-authenticated.spec.ts`, asserção não-nula legítima após simular autenticação bem-sucedida) e nenhuma alteração necessária em `upload-rate-limiter.ts` (já usava `req.user?.id`). Três mappers novos (`CompanyMapper`, `StockMapper`, `AuditLogMapper`) substituem os `as ICompany`/`as IStock`/`as IAuditLog` em `PrismaCompanyRepository`, `PrismaStockRepository` e `PrismaAuditLogRepository`, seguindo exatamente o padrão de `ProductMapper` (M3-08). Teste novo no PostgreSQL Integration Gate exercita `AuditLogMapper` pela primeira vez contra dados reais — `findByCompanyId`/`findByUserId` nunca tinham cobertura própria porque não têm chamador em produção (achado de M5-01) — provando tradução correta do enum `AuditAction`, das colunas `Json` (`previousState`/`newState`) e do escopo (empresa sem registro retorna lista vazia, sem vazamento). Suíte completa: 277/277; gate PostgreSQL: 31/31; typecheck, lint, build, `verify:production` e `git diff --check` aprovados. Nenhuma migration necessária.
+
 **Descrição**
 Tornar `req.user` opcional no tipo (refletindo a realidade das rotas não autenticadas) e trocar os `as` dos repositórios por mappers explícitos, seguindo o padrão já estabelecido para produto.
 *Itens de origem: 10.4*
@@ -804,6 +884,10 @@ Tornar `req.user` opcional no tipo (refletindo a realidade das rotas não autent
 ---
 
 ### M6-05 · Dublê de usuário compartilhado
+
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** confirmadas as duas implementações divergentes: `register-user.spec.ts` usava ID fixo `'user-id-mock'` para todo usuário criado; `login.spec.ts` usava um ID fixo diferente, `'user-1'`. `InMemoryUserRepository` único criado em `src/repositories/in-memory/in-memory-user.repository.ts` (mesmo diretório dos demais dublês compartilhados — Company, Stock, Product, AuditLog), com IDs auto-incrementais (`user-${n}`), replicando o comportamento real de `PrismaUserRepository.create` (retorna sem `password`, mas armazena o hash internamente para os testes inspecionarem via `.items`). Os dois specs foram migrados para importá-lo, removendo as classes duplicadas. Dois testes novos provam a capacidade antes impossível: `register-user.spec.ts` confirma que dois cadastros recebem IDs distintos; `login.spec.ts` confirma que um segundo usuário autentica com identidade própria (`user-2`), distinta do primeiro. Suíte completa: 279/279; typecheck, lint, build, `verify:production` e `git diff --check` aprovados. Nenhuma alteração em produção; nenhuma migration necessária.
 
 **Descrição**
 Criar repositório in-memory de usuário único, substituindo as duas implementações divergentes declaradas dentro dos specs.
@@ -821,6 +905,10 @@ Criar repositório in-memory de usuário único, substituindo as duas implementa
 
 ### M6-06 · Reconciliar documentação e limpar resíduos
 
+**Status:** Concluída em 2026-08-14.
+
+**Evidência de validação:** README reescrito do zero descrevendo a arquitetura real — rotas, autenticação/tenancy, pipeline de upload/IA, sugestões human-in-the-loop, Postgres/Prisma, observabilidade (logger/auditoria/telemetria), operação (shutdown/CI), tabela completa de variáveis de ambiente e instruções de execução local. Removidas as referências a `src/entities/` e a `MockStorageProvider`/`MockAiProvider`, que não existem no código. Diretórios vazios removidos: `src/entities/` e `src/services/` (ambos sem nenhum arquivo, confirmados antes da remoção). Decisões arquiteturais deliberadas registradas explicitamente: sem container de DI, sem camada de entidades, match incerto nunca entra direto no estoque, auditoria sem endpoint HTTP hoje, `AuditLog` sem política de retenção automática (decisão já fundamentada em M5-01), e a convenção de artefatos `.js`/`.d.ts` commitados junto do `.ts` (relevante para quem for rodar testes após editar `.ts`, descoberta nesta sessão). Idioma das mensagens de usuário: auditoria confirmou que toda mensagem de `AppError` em código de produção já estava em português; a única exceção real foi o fallback genérico de erro do handler global (`'Internal server error'`, em inglês, usado em todo erro 500 não classificado) — corrigido para `'Erro interno do servidor.'`, com o teste correspondente atualizado. Suíte completa: 279/279; gate PostgreSQL: 31/31; typecheck, lint, build, `prisma validate`, `verify:production` e `git diff --check` aprovados.
+
 **Descrição**
 Atualizar o README para descrever a arquitetura real, remover diretórios vazios, padronizar o idioma das mensagens de usuário em português e registrar as decisões arquiteturais deliberadas (ausência de container de DI, ausência de camada de entidades, não-persistência de match incerto).
 *Itens de origem: 7.4, 10.4*
@@ -832,6 +920,10 @@ Atualizar o README para descrever a arquitetura real, remover diretórios vazios
 | **Risco** | **Nulo** |
 | **Prioridade** | **P3** |
 | **Impacto** | O README descreve entidades e mocks que não existem e um formato de ingestão que não é o real — documentação que descreve um sistema inexistente induz decisão errada. As boas decisões arquiteturais hoje existem apenas tacitamente e serão desfeitas por quem não souber que foram deliberadas. |
+
+---
+
+**Saída do Milestone 6:** validado. Todas as tarefas (M6-01 a M6-06) concluídas em 2026-08-14: convenções de erro unificadas (com um bug real de produção corrigido — `/users` retornava `500` em vez de `409` em e-mail duplicado), limiar de similaridade centralizado e configurável, storage/IA desacoplados de caminho de arquivo, tipagem de `req.user` corrigida e mappers explícitos para Company/Stock/AuditLog, dublê de usuário único habilitando cenários multiusuário, e documentação reconciliada com a arquitetura real. **Milestone 6 concluído em 2026-08-14.**
 
 ---
 
