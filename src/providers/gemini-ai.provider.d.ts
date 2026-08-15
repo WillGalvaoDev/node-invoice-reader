@@ -1,4 +1,4 @@
-import type { IAiProvider, IDanfeExtractResult, ISimilarityMatch } from '../providers/ai.provider.js';
+import type { IAiProvider, IDanfeExtractResult, ISimilarityResult } from '../providers/ai.provider.js';
 import type { IProduct } from '../repositories/product.repository.js';
 import { type DanfeMimeType } from '../config/upload.js';
 import { type IAiTelemetry } from '../infra/ai-telemetry.js';
@@ -31,6 +31,6 @@ export declare class GeminiAiProvider implements IAiProvider {
     }): Promise<IDanfeExtractResult>;
     findSimilarProduct(newItemDescription: string, existingProducts: IProduct[], context?: {
         requestId?: string;
-    }): Promise<ISimilarityMatch | null>;
+    }): Promise<ISimilarityResult>;
 }
 //# sourceMappingURL=gemini-ai.provider.d.ts.map

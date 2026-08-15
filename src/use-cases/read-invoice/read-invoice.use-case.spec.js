@@ -47,7 +47,7 @@ describe('ReadInvoiceUseCase', () => {
         };
         aiProviderMock = {
             extractDanfeData: vi.fn().mockResolvedValue(mockAiResult),
-            findSimilarProduct: vi.fn().mockResolvedValue(null)
+            findSimilarProduct: vi.fn().mockResolvedValue({ kind: 'no_match' })
         };
         productRepositoryMock = {
             save: vi.fn().mockImplementation((product) => Promise.resolve({ id: 'new-id', ...product })),
@@ -220,12 +220,13 @@ describe('ReadInvoiceUseCase', () => {
         aiProviderMock.findSimilarProduct.mockImplementation((desc) => {
             if (desc.includes('PARAF')) {
                 return Promise.resolve({
+                    kind: 'match',
                     product: similarProduct,
                     confidence: 0.88,
                     reason: 'Descrição equivalente para parafuso'
                 });
             }
-            return Promise.resolve(null);
+            return Promise.resolve({ kind: 'no_match' });
         });
         const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
         expect(result.suggestions).toHaveLength(1);
@@ -251,7 +252,7 @@ describe('ReadInvoiceUseCase', () => {
             unitMeasurement: 'UN', unitPrice: 2, totalPrice: 20, stockId: 'stock-1', userId: 'user-1',
         };
         productRepositoryMock.findByStockId.mockResolvedValue([similarProduct]);
-        aiProviderMock.findSimilarProduct.mockResolvedValue({ product: similarProduct, confidence: 0.88, reason: 'similar' });
+        aiProviderMock.findSimilarProduct.mockResolvedValue({ kind: 'match', product: similarProduct, confidence: 0.88, reason: 'similar' });
         telemetryMock.recordSuggestion.mockImplementationOnce(() => { throw new Error('telemetry unavailable'); });
         const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1' });
         expect(result.suggestions).toEqual(expect.arrayContaining([expect.objectContaining({ confidence: 0.88 })]));
@@ -340,7 +341,7 @@ describe('ReadInvoiceUseCase', () => {
         };
         aiProviderMock.extractDanfeData.mockResolvedValueOnce(twoItems);
         aiProviderMock.findSimilarProduct.mockImplementationOnce(async (_description, candidates) => ({
-            product: candidates[0], confidence: 0.9, reason: 'mesmo produto',
+            kind: 'match', product: candidates[0], confidence: 0.9, reason: 'mesmo produto',
         }));
         await sut.execute({ filePath: '/path/two-items.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
         const persistedPlan = invoicePersistenceMock.persist.mock.calls[0][0];

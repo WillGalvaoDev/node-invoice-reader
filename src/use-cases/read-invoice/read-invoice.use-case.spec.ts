@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Mocked } from 'vitest';
 import { ReadInvoiceUseCase } from './read-invoice.use-case.js';
 import type { IStorageProvider } from '../../providers/storage.provider.js';
-import type { IAiProvider, IDanfeExtractResult } from '../../providers/ai.provider.js';
+import type { IAiProvider, IDanfeExtractResult, ISimilarityCandidate } from '../../providers/ai.provider.js';
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
@@ -60,7 +60,7 @@ describe('ReadInvoiceUseCase', () => {
 
     aiProviderMock = {
       extractDanfeData: vi.fn().mockResolvedValue(mockAiResult),
-      findSimilarProduct: vi.fn().mockResolvedValue(null)
+      findSimilarProduct: vi.fn().mockResolvedValue({ kind: 'no_match' })
     } as unknown as Mocked<IAiProvider>;
 
     productRepositoryMock = {
@@ -255,7 +255,7 @@ describe('ReadInvoiceUseCase', () => {
   });
 
   it('deve gerar uma sugestão de vínculo quando a IA encontrar um produto similar no estoque', async () => {
-    const similarProduct: IProduct = {
+    const similarProduct: ISimilarityCandidate = {
       id: 'similar-id',
       code: 'PAR-001',
       description: 'PARAFUSO SEXTAVADO 1/4 INCH',
@@ -272,12 +272,13 @@ describe('ReadInvoiceUseCase', () => {
     aiProviderMock.findSimilarProduct.mockImplementation((desc) => {
       if (desc.includes('PARAF')) {
         return Promise.resolve({
+          kind: 'match' as const,
           product: similarProduct,
           confidence: 0.88,
           reason: 'Descrição equivalente para parafuso'
         });
       }
-      return Promise.resolve(null);
+      return Promise.resolve({ kind: 'no_match' as const });
     });
 
     const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
@@ -306,7 +307,7 @@ describe('ReadInvoiceUseCase', () => {
       unitMeasurement: 'UN', unitPrice: 2, totalPrice: 20, stockId: 'stock-1', userId: 'user-1',
     };
     productRepositoryMock.findByStockId.mockResolvedValue([similarProduct]);
-    aiProviderMock.findSimilarProduct.mockResolvedValue({ product: similarProduct, confidence: 0.88, reason: 'similar' });
+    aiProviderMock.findSimilarProduct.mockResolvedValue({ kind: 'match', product: similarProduct, confidence: 0.88, reason: 'similar' });
     telemetryMock.recordSuggestion.mockImplementationOnce(() => { throw new Error('telemetry unavailable'); });
 
     const result = await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1' });
@@ -421,7 +422,7 @@ describe('ReadInvoiceUseCase', () => {
     };
     aiProviderMock.extractDanfeData.mockResolvedValueOnce(twoItems);
     aiProviderMock.findSimilarProduct.mockImplementationOnce(async (_description, candidates) => ({
-      product: candidates[0]!, confidence: 0.9, reason: 'mesmo produto',
+      kind: 'match' as const, product: candidates[0] as ISimilarityCandidate, confidence: 0.9, reason: 'mesmo produto',
     }));
 
     await sut.execute({ filePath: '/path/two-items.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });

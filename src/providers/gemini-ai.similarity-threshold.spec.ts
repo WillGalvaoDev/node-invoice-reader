@@ -40,7 +40,9 @@ describe('GeminiAiProvider limiar de confiança configurável (M6-02)', () => {
     generateContent.mockResolvedValueOnce({ text: JSON.stringify({
       matchFound: true, matchedProductId: 'p1', confidence: 0.8, reason: 'abaixo do limiar configurado',
     }) });
-    await expect(new GeminiAiProvider().findSimilarProduct('Produto', [product])).resolves.toBeNull();
+    // Abaixo do limiar e no_match legitimo: o modelo respondeu e a politica e nossa.
+    await expect(new GeminiAiProvider().findSimilarProduct('Produto', [product]))
+      .resolves.toEqual({ kind: 'no_match' });
 
     generateContent.mockResolvedValueOnce({ text: JSON.stringify({
       matchFound: true, matchedProductId: 'p1', confidence: 0.9, reason: 'acima do limiar configurado',

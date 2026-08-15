@@ -1,4 +1,5 @@
 import { AppError } from '../../errors/app-error.js';
+import { SimilarityUnavailableError } from '../../errors/similarity-unavailable.error.js';
 import { logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
 import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.js';
@@ -31,6 +32,11 @@ export class ReadInvoiceUseCase {
             .replace(/<[^>]+>/g, '')
             .replace(/\s+/g, ' ')
             .trim();
+    }
+    findSimilarProduct(description, candidates, requestId) {
+        return requestId
+            ? this.aiProvider.findSimilarProduct(description, candidates, { requestId })
+            : this.aiProvider.findSimilarProduct(description, candidates);
     }
     productAuditState(product) {
         return {
@@ -116,32 +122,43 @@ export class ReadInvoiceUseCase {
                     continue;
                 }
                 const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
-                const similarityMatch = candidates.length > 0
-                    ? requestId
-                        ? await this.aiProvider.findSimilarProduct(item.description, candidates, { requestId })
-                        : await this.aiProvider.findSimilarProduct(item.description, candidates)
-                    : null;
-                if (similarityMatch?.product.id) {
+                const similarity = candidates.length > 0
+                    ? await this.findSimilarProduct(item.description, candidates, requestId)
+                    : { kind: 'no_match' };
+                // Indisponibilidade não é evidência de item novo. Abortar aqui — antes da
+                // transação — não persiste nada e não consome a chave de idempotência,
+                // então a mesma nota pode ser reenviada quando o provedor voltar.
+                if (similarity.kind === 'unavailable') {
+                    this.applicationLogger.warn('Invoice aborted: similarity matching unavailable', {
+                        ...(requestId && { requestId }),
+                        companyId: authorizedStock.companyId,
+                        stockId,
+                        itemIndex,
+                        reason: similarity.reason,
+                    });
+                    throw new SimilarityUnavailableError(similarity.reason);
+                }
+                if (similarity.kind === 'match') {
                     const suggestionId = randomUUID();
                     suggestions.push({
                         id: suggestionId,
                         status: 'PENDING',
                         invoiceItem: item,
-                        suggestedProduct: similarityMatch.product,
-                        confidence: similarityMatch.confidence,
-                        reason: similarityMatch.reason,
+                        suggestedProduct: similarity.product,
+                        confidence: similarity.confidence,
+                        reason: similarity.reason,
                     });
                     suggestionOperations.push({
                         id: suggestionId,
                         itemIndex,
-                        suggestedProductId: similarityMatch.product.id,
+                        suggestedProductId: similarity.product.id,
                         receivedCode: item.code,
                         receivedDescription: item.description,
                         receivedQuantity: Number(item.quantity),
                         receivedUnitPrice: Number(item.unitPrice),
                         unitMeasurement: item.unitMeasurement,
-                        confidence: similarityMatch.confidence,
-                        reason: similarityMatch.reason,
+                        confidence: similarity.confidence,
+                        reason: similarity.reason,
                     });
                     continue;
                 }

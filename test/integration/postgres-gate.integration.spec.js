@@ -145,7 +145,7 @@ describe('PostgreSQL Integration Gate', () => {
         let similarityCalls = 0;
         const ai = {
             async extractDanfeData() { return extracted; },
-            async findSimilarProduct() { similarityCalls += 1; return null; },
+            async findSimilarProduct() { similarityCalls += 1; return { kind: 'no_match' }; },
         };
         const storage = { async readFile() { return Buffer.alloc(0); }, async deleteFile() { } };
         const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
@@ -217,7 +217,7 @@ describe('PostgreSQL Integration Gate', () => {
         };
         const ai = {
             async extractDanfeData() { return extracted; },
-            async findSimilarProduct() { return { product: { ...product(stock.id, candidate.code, 10), id: candidate.id }, confidence: 0.88, reason: 'equivalente' }; },
+            async findSimilarProduct() { return { kind: 'match', product: { ...product(stock.id, candidate.code, 10), id: candidate.id }, confidence: 0.88, reason: 'equivalente' }; },
         };
         const storage = { async readFile() { return Buffer.alloc(0); }, async deleteFile() { } };
         const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
@@ -525,7 +525,7 @@ describe('PostgreSQL Integration Gate', () => {
         };
         const ai = {
             async extractDanfeData() { aiCalls += 1; return extracted; },
-            async findSimilarProduct() { return null; },
+            async findSimilarProduct() { return { kind: 'no_match' }; },
         };
         const storage = { async readFile() { return Buffer.alloc(0); }, async deleteFile() { } };
         const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
@@ -551,7 +551,7 @@ describe('PostgreSQL Integration Gate', () => {
             products: [{ code: 'AUDITED', description: 'Descrição não necessária', quantity: 5, unitPrice: 20, totalPrice: 100, unitMeasurement: 'UN' }],
         };
         const ai = {
-            async extractDanfeData() { return extracted; }, async findSimilarProduct() { return null; },
+            async extractDanfeData() { return extracted; }, async findSimilarProduct() { return { kind: 'no_match' }; },
         };
         const storage = { async readFile() { return Buffer.alloc(0); }, async deleteFile() { } };
         const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
@@ -587,7 +587,7 @@ describe('PostgreSQL Integration Gate', () => {
         };
         const ai = {
             async extractDanfeData() { return extracted; },
-            async findSimilarProduct() { return null; },
+            async findSimilarProduct() { return { kind: 'no_match' }; },
         };
         const storage = { async readFile() { return Buffer.alloc(0); }, async deleteFile() { } };
         const failingAudit = {

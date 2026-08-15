@@ -195,7 +195,7 @@ describe('GeminiAiProvider file MIME', () => {
       .rejects.toMatchObject({ statusCode: 422 });
   });
 
-  it('preserva matching valido e degrada resposta invalida para null sem retry', async () => {
+  it('preserva matching valido e classifica resposta invalida como unavailable sem retry', async () => {
     const product = { id: 'p1', code: 'A', description: 'A', quantity: 1, unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1, stockId: 's1' };
     generateContent.mockResolvedValueOnce({ text: JSON.stringify({
       matchFound: true, matchedProductId: 'p1', confidence: 0.9, reason: 'same',
@@ -204,7 +204,9 @@ describe('GeminiAiProvider file MIME', () => {
     await expect(new GeminiAiProvider().findSimilarProduct('A', [product])).resolves.toMatchObject({ product, confidence: 0.9 });
 
     generateContent.mockResolvedValueOnce({ text: '{malformed' });
-    await expect(new GeminiAiProvider().findSimilarProduct('A', [product])).resolves.toBeNull();
+    // P0-02: JSON invalido nao e evidencia de "produto novo".
+    await expect(new GeminiAiProvider().findSimilarProduct('A', [product]))
+      .resolves.toEqual({ kind: 'unavailable', reason: 'invalid_response' });
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
 
@@ -265,15 +267,20 @@ describe('GeminiAiProvider file MIME', () => {
       reason: 'injected candidate',
     }) });
 
-    await expect(new GeminiAiProvider().findSimilarProduct('A', [product])).resolves.toBeNull();
+    // A defesa continua: o ID nao e aceito. P0-02 muda apenas a conclusao —
+    // resposta inconfiavel vira unavailable, nunca "cadastre como produto novo".
+    const result = await new GeminiAiProvider().findSimilarProduct('A', [product]);
+    expect(result).toEqual({ kind: 'unavailable', reason: 'candidate_not_offered' });
+    expect(result.kind).not.toBe('match');
   });
 
-  it('degrada similarity fora do schema para null e ignora campos extras em resposta válida', async () => {
+  it('classifica similarity fora do schema como unavailable e ignora campos extras em resposta válida', async () => {
     const product = { id: 'p1', code: 'A', description: 'A', quantity: 1, unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1, stockId: 's1' };
     generateContent.mockResolvedValueOnce({ text: JSON.stringify({
       matchFound: true, matchedProductId: 'p1', confidence: 2, reason: 'invalid',
     }) });
-    await expect(new GeminiAiProvider().findSimilarProduct('A', [product])).resolves.toBeNull();
+    await expect(new GeminiAiProvider().findSimilarProduct('A', [product]))
+      .resolves.toEqual({ kind: 'unavailable', reason: 'invalid_response' });
 
     generateContent.mockResolvedValueOnce({ text: JSON.stringify({
       matchFound: true, matchedProductId: 'p1', confidence: 0.9, reason: 'same', extra: 'ignored',

@@ -1,9 +1,10 @@
 import type { IStorageProvider } from '../../providers/storage.provider.js';
-import type { IAiProvider, IDanfeExtractResult, ISimilarityMatch } from '../../providers/ai.provider.js';
+import type { IAiProvider, IDanfeExtractResult, ISimilarityResult } from '../../providers/ai.provider.js';
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
 import { AppError } from '../../errors/app-error.js';
+import { SimilarityUnavailableError } from '../../errors/similarity-unavailable.error.js';
 import type { IInvoicePersistenceRepository, IInvoiceProductOperation } from '../../repositories/invoice-persistence.repository.js';
 import type { DanfeMimeType } from '../../config/upload.js';
 import { logger, type Logger } from '../../infra/logger.js';
@@ -56,6 +57,16 @@ export class ReadInvoiceUseCase {
       .replace(/<[^>]+>/g, '')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  private findSimilarProduct(
+    description: string,
+    candidates: IProduct[],
+    requestId?: string | undefined,
+  ): Promise<ISimilarityResult> {
+    return requestId
+      ? this.aiProvider.findSimilarProduct(description, candidates, { requestId })
+      : this.aiProvider.findSimilarProduct(description, candidates);
   }
 
   private productAuditState(product: IProduct) {
@@ -161,33 +172,45 @@ export class ReadInvoiceUseCase {
         }
 
         const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
-        const similarityMatch: ISimilarityMatch | null = candidates.length > 0
-          ? requestId
-            ? await this.aiProvider.findSimilarProduct(item.description, candidates, { requestId })
-            : await this.aiProvider.findSimilarProduct(item.description, candidates)
-          : null;
+        const similarity: ISimilarityResult = candidates.length > 0
+          ? await this.findSimilarProduct(item.description, candidates, requestId)
+          : { kind: 'no_match' };
 
-        if (similarityMatch?.product.id) {
+        // Indisponibilidade não é evidência de item novo. Abortar aqui — antes da
+        // transação — não persiste nada e não consome a chave de idempotência,
+        // então a mesma nota pode ser reenviada quando o provedor voltar.
+        if (similarity.kind === 'unavailable') {
+          this.applicationLogger.warn('Invoice aborted: similarity matching unavailable', {
+            ...(requestId && { requestId }),
+            companyId: authorizedStock.companyId,
+            stockId,
+            itemIndex,
+            reason: similarity.reason,
+          });
+          throw new SimilarityUnavailableError(similarity.reason);
+        }
+
+        if (similarity.kind === 'match') {
           const suggestionId = randomUUID();
           suggestions.push({
             id: suggestionId,
             status: 'PENDING',
             invoiceItem: item,
-            suggestedProduct: similarityMatch.product,
-            confidence: similarityMatch.confidence,
-            reason: similarityMatch.reason,
+            suggestedProduct: similarity.product,
+            confidence: similarity.confidence,
+            reason: similarity.reason,
           });
           suggestionOperations.push({
             id: suggestionId,
             itemIndex,
-            suggestedProductId: similarityMatch.product.id,
+            suggestedProductId: similarity.product.id,
             receivedCode: item.code,
             receivedDescription: item.description,
             receivedQuantity: Number(item.quantity),
             receivedUnitPrice: Number(item.unitPrice),
             unitMeasurement: item.unitMeasurement,
-            confidence: similarityMatch.confidence,
-            reason: similarityMatch.reason,
+            confidence: similarity.confidence,
+            reason: similarity.reason,
           });
           continue;
         }

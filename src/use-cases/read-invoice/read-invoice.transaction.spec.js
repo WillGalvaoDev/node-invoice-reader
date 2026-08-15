@@ -23,7 +23,7 @@ describe('ReadInvoiceUseCase transaction phases', () => {
         storage.deleteFile.mockResolvedValue(undefined);
         stocks.findByIdForUser.mockResolvedValue({ id: 'stock-1', companyId: 'company-1', name: 'Stock' });
         ai.extractDanfeData.mockResolvedValue(invoice);
-        ai.findSimilarProduct.mockResolvedValue(null);
+        ai.findSimilarProduct.mockResolvedValue({ kind: 'no_match' });
         products.findByStockId.mockResolvedValue([
             { id: 'candidate', code: 'C', description: 'Candidate', stockId: 'stock-1' },
         ]);
@@ -36,7 +36,7 @@ describe('ReadInvoiceUseCase transaction phases', () => {
     it('prepara extração e decisões antes de iniciar a persistência transacional', async () => {
         const order = [];
         ai.extractDanfeData.mockImplementation(async () => { order.push('extract'); return invoice; });
-        ai.findSimilarProduct.mockImplementation(async () => { order.push('similarity'); return null; });
+        ai.findSimilarProduct.mockImplementation(async () => { order.push('similarity'); return { kind: 'no_match' }; });
         persistence.persist.mockImplementation(async ({ operations }) => { order.push('transaction'); return operations; });
         audit.create.mockImplementation(async (log) => { order.push('audit'); return log; });
         await makeSut().execute({ filePath: '/tmp/invoice', mimeType: 'application/pdf', stockId: 'stock-1', userId: 'owner-1' });
@@ -66,6 +66,7 @@ describe('ReadInvoiceUseCase transaction phases', () => {
     });
     it('mantém sugestão incerta fora do plano de escrita', async () => {
         ai.findSimilarProduct.mockResolvedValueOnce({
+            kind: 'match',
             product: { id: 'existing', code: 'X', description: 'Similar', quantity: 1, unitMeasurement: 'UN', unitPrice: 1, totalPrice: 1, stockId: 'stock-1' },
             confidence: 0.9,
             reason: 'similar',

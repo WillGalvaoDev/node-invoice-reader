@@ -231,8 +231,9 @@ export class GeminiAiProvider {
         }
     }
     async findSimilarProduct(newItemDescription, existingProducts, context) {
+        // Sem catálogo não há contra o que comparar: conclusão legítima, não indisponibilidade.
         if (existingProducts.length === 0)
-            return null;
+            return { kind: 'no_match' };
         const responseSchema = {
             type: Type.OBJECT,
             properties: {
@@ -252,7 +253,8 @@ export class GeminiAiProvider {
             item: { description: newItemDescription },
             candidates: productsListFormatted,
         });
-        const candidateIds = new Set(productsListFormatted.map(({ id }) => id));
+        // Só candidatos com identidade persistida podem ser escolhidos.
+        const candidateIds = new Set(productsListFormatted.map(({ id }) => id).filter((id) => typeof id === 'string' && id.length > 0));
         const startedAt = this.monotonicNow();
         let attempts = 0;
         let response;
@@ -272,23 +274,27 @@ export class GeminiAiProvider {
             }, () => { attempts += 1; });
             const parsed = this.parseSimilarityResponse(response.text);
             this.recordCall('product_similarity', 'success', startedAt, attempts, response, undefined, context?.requestId);
+            // O modelo respondeu e negou equivalência, ou não alcançou o limiar: conclusão legítima.
             if (!parsed.matchFound || parsed.confidence < env.SIMILARITY_CONFIDENCE_THRESHOLD) {
-                return null;
+                return { kind: 'no_match' };
             }
-            if (!candidateIds.has(parsed.matchedProductId))
-                return null;
-            const matchedProduct = existingProducts.find((p) => p.id === parsed.matchedProductId);
-            if (!matchedProduct)
-                return null;
+            // O ID fora da lista continua recusado (defesa de M2-06). O que muda é a conclusão:
+            // uma resposta comprovadamente inconfiável não é evidência de que o item seja novo.
+            const matchedProduct = candidateIds.has(parsed.matchedProductId)
+                ? existingProducts.find((product) => product.id === parsed.matchedProductId)
+                : undefined;
+            if (!matchedProduct?.id)
+                return { kind: 'unavailable', reason: 'candidate_not_offered' };
             return {
-                product: matchedProduct,
+                kind: 'match',
+                product: { ...matchedProduct, id: matchedProduct.id },
                 confidence: parsed.confidence,
                 reason: parsed.reason,
             };
         }
         catch (error) {
             this.recordCall('product_similarity', 'failure', startedAt, attempts, response, this.failureCategory(error), context?.requestId);
-            return null;
+            return { kind: 'unavailable', reason: this.failureCategory(error) };
         }
     }
 }

@@ -47,7 +47,7 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | `POST` | `/login` | pública, rate limit 10/15min por IP | Autenticação; devolve JWT. |
 | `POST` | `/companies` | Bearer JWT | Cria empresa + estoque principal em uma transação atômica. |
 | `GET`  | `/products` | Bearer JWT | Lista paginada (cursor) por `stockId`. Exige acesso ao estoque. |
-| `POST` | `/invoices/upload` | Bearer JWT, rate limit 5/min por usuário | Upload de DANFE (JPEG/PNG/PDF, até 10 MiB). Dispara o pipeline completo. |
+| `POST` | `/invoices/upload` | Bearer JWT, rate limit 5/min por usuário | Upload de DANFE (JPEG/PNG/PDF, até 10 MiB). Dispara o pipeline completo. `503` se o matching ficar indisponível — nada é gravado e a nota pode ser reenviada. |
 | `GET`  | `/stocks/:stockId/suggestions` | Bearer JWT | Lista sugestões de produto pendentes do estoque. |
 | `POST` | `/suggestions/:suggestionId/confirm` | Bearer JWT | Confirma uma sugestão: aplica a entrada no produto sugerido. |
 | `POST` | `/suggestions/:suggestionId/reject` | Bearer JWT | Rejeita uma sugestão: cadastra o item como produto novo. |
@@ -66,7 +66,22 @@ Autorização é sempre derivada do recurso, nunca do corpo/query da requisiçã
 4. Gemini extrai os dados com timeout de 30s, no máximo 2 tentativas (retry só para `429`/`5xx`/erro de rede), e a resposta é validada por schema `zod` — nada do modelo é confiado sem validação de tipo/estrutura.
 5. Coerência do DANFE é verificada (soma dos itens vs. total declarado, tolerância `max(R$0,02, 1%)`) antes de qualquer persistência.
 6. Matching: item com código exato atualiza o produto automaticamente. Sem código exato, um pré-filtro determinístico (léxico, sem IA) reduz o catálogo a no máximo 15 candidatos; só então o Gemini é chamado para similaridade — nunca com o estoque inteiro.
-7. Toda a persistência de uma nota (upsert de produtos com custo médio ponderado, criação de sugestões, `ProcessedInvoice`) acontece em **uma única transação Postgres**. Reenvio da mesma chave de acesso é idempotente (`409` em duplicata).
+7. O resultado da similaridade tem **três estados distinguíveis pelo tipo** — `match`, `no_match` e `unavailable` — e nunca `null`. Ver [Indisponibilidade do matching](#indisponibilidade-do-matching) abaixo.
+8. Toda a persistência de uma nota (upsert de produtos com custo médio ponderado, criação de sugestões, `ProcessedInvoice`) acontece em **uma única transação Postgres**. Reenvio da mesma chave de acesso é idempotente (`409` em duplicata).
+
+### Indisponibilidade do matching
+
+`IAiProvider.findSimilarProduct` devolve uma união discriminada, nunca `null`:
+
+| Estado | Significado | Efeito |
+|---|---|---|
+| `match` | o modelo respondeu e indicou um candidato **da lista fornecida**, com confiança ≥ limiar | vira `ProductSimilaritySuggestion` pendente |
+| `no_match` | o modelo respondeu validamente que não há equivalente, ou a confiança ficou abaixo do limiar, ou não havia candidato | item é cadastrado como produto novo |
+| `unavailable` | **não há evidência confiável para concluir nada** | a nota inteira é abortada, sem persistir |
+
+`unavailable` cobre timeout, falha 5xx do provedor, JSON inválido, resposta fora do schema e **ID de candidato fora da lista enviada** (alucinação — a defesa contra prompt injection continua recusando o ID; o que mudou é a conclusão).
+
+**Falha técnica da IA não é evidência de que o item seja novo.** Quando ocorre `unavailable`, a nota é abortada **antes da transação de persistência** e a requisição responde `503`. Nada é gravado — nem produto, nem sugestão, nem `ProcessedInvoice` —, então a chave de idempotência **não é consumida** e a mesma DANFE pode ser reenviada quando o provedor voltar. O `503` é deliberadamente distinto do `400`/`422` de documento inválido: ali o problema é o documento, aqui o documento pode estar perfeito.
 
 ### Sugestões de produto (human-in-the-loop)
 
@@ -129,6 +144,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 * **Sem container de injeção de dependência.** A composição de dependências é feita manualmente em `src/routes.ts`. O projeto é pequeno o suficiente para que um container adicione indireção sem benefício claro.
 * **Sem camada de `entities/`.** As regras de domínio que existem (CNPJ, coerência do DANFE) são funções puras em `src/domain/`; não há necessidade de objetos de entidade com identidade própria além do que os tipos de repositório (`IProduct`, `ICompany`, etc.) já expressam.
 * **Match incerto nunca entra direto no estoque.** Toda sugestão de similaridade da IA fica pendente até confirmação humana — não existe caminho de código que aplique uma sugestão automaticamente, mesmo com confiança alta.
+* **Indisponibilidade da IA nunca vira decisão de domínio.** O resultado da similaridade é uma união discriminada de três estados, e não `null`, justamente para que o compilador impeça `unavailable` de ser lido como `no_match`. Uma falha de transporte não pode criar produto no catálogo do cliente.
 * **Auditoria não tem endpoint de leitura HTTP hoje.** `IAuditLogRepository.findByCompanyId`/`findByUserId` existem, são testados e indexados, mas não há rota que os exponha — decisão deliberada de manter o escopo da API restrito ao fluxo operacional até haver necessidade real de um endpoint de auditoria.
 * **`AuditLog` não tem política de retenção automática.** Decisão conservadora: nenhuma exclusão automática até haver requisito legal/de negócio definido para o prazo de guarda de dado fiscal.
 * **Artefatos de build (`.js`/`.d.ts`) são commitados junto do `.ts`.** Os testes importam por caminho `.js` (convenção `nodenext`); rode `npm run build` após editar `.ts` antes de rodar a suíte, ou o Vitest pode resolver o arquivo compilado desatualizado em vez do fonte.
