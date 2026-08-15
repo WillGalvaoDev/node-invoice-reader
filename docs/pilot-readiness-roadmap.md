@@ -12,7 +12,8 @@
 | **r2** | **(a)** Falha de similaridade promovida de risco observado para correção obrigatória pré-piloto (**P0-02**, bloqueia P6-01). **(b)** Contabilidade de gasto separada da observabilidade: **AI Budget Ledger** (autoritativo, escrita forte, fail-closed) deixa de depender do **AI Call Events** (best-effort), com reconciliação periódica (**P3-04**). **(c)** Revogação de token migrada de `passwordChangedAt` × `JWT.iat` para **`authVersion`** inteiro no JWT. Consequência: 22 tarefas e **o caminho crítico muda** — ver §8. |
 | **r3** | Decisões humanas de P0-01 aprovadas e incorporadas: **Render Free** + **Neon Free** + **sem frontend** + **cadastro por código de convite** + **Gemini Free Tier, paid budget USD 0**. P5 deixa de tratar plataforma como abstração. **O ledger muda de natureza** — de orçamento em USD para **cota de uso** (requests/tokens), preservando integralmente o contrato da r2. Kill switch separado do orçamento (`GEMINI_ENABLED`). **Uma incompatibilidade material encontrada e escalada** — ver §13-A. Contagem de tarefas inalterada: 22. |
 | **r4** | **§13-A RESOLVIDA.** Free Tier passa a ser o tier de **desenvolvimento privado**; **Paid Tier é gate operacional antes do piloto externo com DANFE real**. Consequências: P4-02 desenhado para **dois modos** (A free / B paid) com o mesmo mecanismo; P3 e P3-04 preparados para os dois estágios; novo **gate REAL-DOCUMENT AI TIER** antes de P6-01. Custo variável de IA passa a ser aceito a partir do piloto real; R$ 0 fixo permanece para Render + Neon. **P0-02 implementada e commitada** (`cfa6ca3`, TDD completo, 303/303 + Gate 31/31). |
-| **r5** | **P1-01 implementada** (não commitada nesta rodada). `GET /companies` com discovery por owner+colaborador, `role` derivado sem query extra, paginação por cursor no padrão de `/products`. `findByOwnerId` (sem chamador) removido em favor de `findAccessibleById`/`findAccessiblePageByUserId`. Suíte 303 → 315; Gate 31 → 33, com prova de ausência de N+1. |
+| **r5** | **P1-01 implementada e commitada** (`d02236e`). `GET /companies` com discovery por owner+colaborador, `role` derivado sem query extra, paginação por cursor no padrão de `/products`. `findByOwnerId` (sem chamador) removido em favor de `findAccessibleById`/`findAccessiblePageByUserId`. Suíte 303 → 315; Gate 31 → 33, com prova de ausência de N+1. |
+| **r6** | **P1-02 implementada** (não commitada nesta rodada). `GET /companies/:companyId/stocks`. `company access ≠ stock access`: gate de existência via `ICompanyRepository.findAccessibleById` (P1-01, 404 anti-enumeration), listagem via `IStockRepository.findViewablePageByCompanyId` — owner vê tudo sem depender de `StockPermission`, colaborador só `canView=true`. Cursor validado por reuso de `findByIdForViewer` (sem duplicar autorização). Paginação por cursor adotada por consistência com `/companies` e `/products`, **superando a nota "sem paginação" do rascunho original de P1-02** — ver a tarefa para a justificativa. `findByCompanyId` (sem chamador) removido. Suíte 315 → 330; Gate 33 → 37, com prova de ausência de N+1. **Discovery mínimo Company → Stock completo** — ver §17. |
 
 ---
 
@@ -656,23 +657,30 @@ A alternativa A é a mais conservadora disponível e a de menor superfície: ela
 
 ### P1-02 · `GET /companies/:companyId/stocks` — estoques visíveis da empresa
 
+**Status: CONCLUÍDA em 2026-08-15.**
+
+**Evidência de validação.** RED: `ListCompanyStocksUseCase`/`ListCompanyStocksController` inexistentes; `routes.http.spec.ts` parou de compilar sem `listCompanyStocks` em `CreateRoutesOptions.controllers` (mesmo mecanismo de força-atualização de P1-01). GREEN: `company access ≠ stock access` implementado como dois gates independentes — `ICompanyRepository.findAccessibleById` decide **existência/404**; `IStockRepository.findViewablePageByCompanyId` (nova, substituindo `findByCompanyId` sem chamador) decide **quais estoques**, com owner via `company.ownerId` e colaborador via `StockPermission.canView`, nunca confundidos. Cursor validado por **reuso** de `findByIdForViewer` — nenhuma autorização duplicada. `tsc` confirmou que remover `findByCompanyId` não quebra nenhum dublê fora do escopo (todos usam `as any`/`as unknown as`, sem checagem estrutural). Suíte **330/330** (315→330, +15); **Gate PostgreSQL 37/37** (33→37, +4), incluindo prova de que o owner vê estoques com **zero** linhas de `StockPermission` (critério #17) e de query única (`vi.spyOn(prisma.stock, 'findMany')` chamado 1 vez). `prisma generate`/`validate`, `lint`, `build`, `verify:production`, `git diff --check` aprovados. **Nenhuma migration criada.**
+
+**Revisão de escopo desta rodada — paginação.** O rascunho original desta tarefa (abaixo) decidia **não paginar**, com a justificativa de que estoques nascem só via `createWithDefaultStock` (um por empresa) e não há `POST /stocks`. Essa premissa continua verdadeira, mas a execução foi instruída a reavaliar contra o padrão já adotado por `GET /companies`/`GET /products` — e a consistência de superfície pesou mais que a economia de uma tarefa que já é **S**: cursor + `limit`, mesmo `orderBy [createdAt desc, id desc]`, mesma forma de validação de cursor fora do universo acessível. Registro isto como decisão desta rodada, não como correção de erro da r4 — a versão sem paginação também seria defensável.
+
 **Problema.** O `stockId` é exigido por `GET /products`, `POST /invoices/upload` e `GET /stocks/:id/suggestions`, e só é revelado uma vez, na resposta de `POST /companies`.
 
 **Objetivo.** Listar os estoques da empresa que o usuário pode visualizar.
 
-**Descrição.** Nova rota autenticada `GET /companies/:companyId/stocks`. Novo método `IStockRepository.findViewableByCompanyId(companyId, userId)` com o mesmo predicado de autorização já usado em `findByIdForViewer` (owner vê todos; colaborador vê apenas estoques com `StockPermission.canView = true`), **substituindo** `findByCompanyId` (hoje sem chamador). Campos: `id`, `name`, `createdAt`.
+**Descrição.** Rota autenticada `GET /companies/:companyId/stocks?limit&cursor`. `IStockRepository.findViewablePageByCompanyId({ companyId, userId, limit, cursor })` com o mesmo predicado de autorização já usado em `findByIdForViewer` (owner vê todos; colaborador vê apenas estoques com `StockPermission.canView = true`), **substituindo** `findByCompanyId` (sem chamador). Campos: `id`, `name`, `createdAt` — sem `companyId` (redundante com o path) nem qualquer estrutura de permissão.
 
-**Contrato decidido:**
+**Contrato final:**
 
 | Pergunta | Decisão | Justificativa |
 |---|---|---|
 | Respeitar `canView`? | **Sim** | É a única semântica de leitura definida no schema. |
-| Owner vê todos? | **Sim** | Consistente com `findByIdForViewer` e com o README. |
+| Owner vê todos? | **Sim, sem depender de `StockPermission`** | O predicado Prisma tem o branch de owner (`company.ownerId`) inteiramente independente de `permissions` — provado no Gate com zero linhas de `StockPermission` existindo. |
 | Colaborador sem `canView` em nenhum estoque | **`200 []`** | Ele já sabe que a empresa existe (aparece no `GET /companies` dele). Um 403 aqui não protege nada e complica o cliente. |
-| Usuário sem relação nenhuma com a empresa | **`404`**, não 403 | Evita confirmar a existência de um `companyId` por enumeração. |
-| Divergência com o 403 das rotas de estoque existentes | **Manter as duas semânticas e documentar** | Os 403 existentes (`/products`, upload, sugestões) também gravam `UNAUTHORIZED_ACCESS` em `AuditLog` — são sinal de segurança em rota onde o cliente já traz um `stockId` de origem desconhecida. Alterá-los é mudança de comportamento fora do escopo. |
-| Auditar o 404 de enumeração? | **Não persistir em `AuditLog`; apenas `logger.warn`** | Persistir uma linha por sondagem dá a um atacante uma escrita ilimitada na tabela de auditoria. |
-| Paginação? | **Não** | Estoques só nascem via `createWithDefaultStock` — **um por empresa**. Não existe `POST /stocks`. A lista é provadamente unitária. Aplicar `take` defensivo de 200 e revisitar quando `POST /stocks` existir. |
+| Usuário sem relação nenhuma com a empresa | **`404`**, não 403 | Evita confirmar a existência de um `companyId` por enumeração. Mensagem idêntica à de empresa inexistente — testado explicitamente (mesma string). |
+| Divergência com o 403 das rotas de estoque existentes | **Mantida, documentada** | Os 403 existentes (`/products`, upload, sugestões) gravam `UNAUTHORIZED_ACCESS` em `AuditLog` — sinal de segurança onde o cliente já traz um `stockId` de origem desconhecida. Rota de discovery não altera esse comportamento. |
+| Auditar o 404 de enumeração? | **Não persistir em `AuditLog`; apenas `logger.warn`** com `userId`/`companyId`/`requestId` | Persistir uma linha por sondagem dá a um atacante escrita ilimitada na tabela de auditoria. |
+| Paginação? | **Sim, cursor** — revisto nesta rodada, ver nota acima | Consistência com `/companies` e `/products`; nenhum padrão novo introduzido. |
+| Cursor de estoque inacessível ou de outra empresa | **`400`** | Reusa `findByIdForViewer(cursor, userId)` — mesma autorização da listagem, sem duplicar regra; `companyId` do resultado comparado ao path param. |
 
 | | |
 |---|---|
@@ -680,19 +688,22 @@ A alternativa A é a mais conservadora disponível e a de menor superfície: ela
 | **Esforço** | **S** |
 | **Risco** | **Baixo** |
 | **Prioridade** | **P0** |
-| **Impacto** | Fecha o gargalo do `stockId`. Com P1-01, o ciclo operacional inteiro passa a ser navegável pela API. |
+| **Impacto** | Fecha o gargalo do `stockId`. Com P1-01, o ciclo operacional inteiro passa a ser navegável pela API. **Discovery mínimo Company → Stock completo.** |
 
 **Critérios de aceite.**
-1. Owner recebe todos os estoques da empresa.
-2. Colaborador recebe **apenas** os estoques com `canView = true`.
-3. Colaborador da empresa sem nenhum `canView` recebe `200 []`.
-4. Usuário sem relação com a empresa recebe `404`, com mensagem que não distingue "não existe" de "sem acesso".
-5. `companyId` inválido (não-UUID) é 400 por schema, antes de qualquer I/O.
-6. Nenhuma linha de `AuditLog` é criada por um 404 de enumeração.
+1. [x] Owner recebe todos os estoques da empresa, inclusive sem nenhuma `StockPermission` existir.
+2. [x] Colaborador recebe **apenas** os estoques com `canView = true`.
+3. [x] Colaborador da empresa sem nenhum `canView` recebe `200 []`.
+4. [x] Usuário sem relação com a empresa recebe `404`, com mensagem idêntica à de empresa inexistente.
+5. [x] `companyId` inválido (não-UUID) é 400 por schema, antes de qualquer I/O.
+6. [x] Nenhuma linha de `AuditLog` é criada por um 404 de enumeração.
+7. [x] Cursor de estoque inacessível ao usuário, ou de outra empresa, é rejeitado com 400.
+8. [x] Nenhum estoque cross-tenant aparece em nenhuma condição.
+9. [x] Query única por chamada (sem N+1), verificado por contagem de invocação do `findMany`.
 
-**Testes esperados.** Unitário para as quatro combinações de acesso; teste de rota para 401/400/404; teste no gate PostgreSQL com owner + colaborador + permissões reais, provando o filtro por `canView` contra o banco.
+**Testes esperados.** Unitário in-memory para as combinações de acesso (owner sem permissão nenhuma, colaborador com/sem `canView`, outsider, empresa inexistente, cross-tenant, duplicidade, paginação com empate, cursor inacessível/de outra empresa/inexistente, ausência de campos internos); teste de controller para 401/200; teste de rota para o envelope e os boundaries de `companyId`/`limit`; teste no Gate PostgreSQL com owner + colaborador + `StockPermission` reais, provando `canView`, isolamento cross-tenant, paginação estável e ausência de N+1.
 
-**Fora de escopo.** `POST /stocks`. Alterar nome de estoque. Expor contagem de produtos ou de sugestões pendentes.
+**Fora de escopo.** `POST /stocks`. Alterar nome de estoque. Expor contagem de produtos ou de sugestões pendentes. Gestão de `CompanyCollaborator`/`StockPermission` (write). `canCreate`/`canEdit`/`canDelete`.
 
 ---
 
@@ -1718,8 +1729,8 @@ O roadmap está concluído quando **todas** as linhas abaixo forem verdadeiras e
 
 **Portão funcional**
 
-- [x] `GET /companies` implementada e testada (unitário, controller, rota, PostgreSQL Gate) — **falta apenas `GET /companies/:id/stocks` (P1-02) e o deploy em produção (P5)**
-- [ ] `GET /companies/:id/stocks` em produção, com isolamento entre tenants testado
+- [x] `GET /companies` implementada e testada (unitário, controller, rota, PostgreSQL Gate)
+- [x] `GET /companies/:id/stocks` implementada e testada (unitário, controller, rota, PostgreSQL Gate) — **discovery mínimo Company → Stock completo; falta apenas o deploy em produção (P5)**
 - [ ] Ciclo completo navegável pela API, **sem SQL em nenhum passo**: login → empresa → estoque → produtos → upload → sugestões → confirmar/rejeitar
 
 **Portão de correção do pipeline de IA** *(novo em r2)* — ✅ **satisfeito por P0-02 em 2026-08-15**
@@ -1897,7 +1908,7 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | 1 | **P0-01** | **Majoritariamente concluída** — resta registrar em `docs/pilot-decisions.md`, resolver as 4 abertas e **levar §13-A à decisão**. O gate operacional do Gemini (projeto sem billing, limites lidos no AI Studio) entra aqui e é pré-requisito de P4-02. |
 | 2 | **P0-02** ✅ | **Única correção de defeito do roadmap.** Cada dia sem ela é um dia em que uma falha do Gemini pode sujar um catálogo. Também precede P3, para que a telemetria meça o pipeline correto. Concluída, commitada (`cfa6ca3`). |
 | 3 | **P1-01** ✅ | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova. Concluída, pendente de commit desta rodada. |
-| 4 | **P1-02** | Fecha o gargalo do `stockId` e completa o ciclo pela API |
+| 4 | **P1-02** ✅ | Fecha o gargalo do `stockId` e completa o ciclo pela API. Concluída, pendente de commit desta rodada. |
 | 5 | **P2-01** | S, segurança, sem dependência; precisa preceder a geração do segredo de produção |
 | 6 | **P5-06** | S, independente; garante que tudo daqui em diante é verificável |
 | 7 | **P4-01** | S; remove a cauda ilimitada antes de existir orçamento a proteger |
@@ -1999,13 +2010,13 @@ Quinze perguntas de verificação, respondidas contra §5-A. Onde a resposta é 
 
 ## 17. Confirmação de escopo desta rodada
 
-**Estado por rodada:** r1–r3 foram documentais, tocando apenas `docs/pilot-readiness-roadmap.md`. **r4 implementou e commitou P0-02** (`cfa6ca3fb51c90066e88b03f5a2c090b46ad00f3`, na `main`, não empurrado). **r5 (esta rodada) implementou P1-01 — não commitada**, aguardando revisão do checkpoint.
+**Estado por rodada:** r1–r3 foram documentais, tocando apenas `docs/pilot-readiness-roadmap.md`. **r4 implementou e commitou P0-02** (`cfa6ca3`). **r5 implementou e commitou P1-01** (`d02236e`). **r6 (esta rodada) implementou P1-02 — não commitada**, aguardando revisão do checkpoint.
 
-- Tarefas com código aplicado até agora: **P0-02** (commitada) e **P1-01** (pendente de commit). Nenhuma outra tarefa foi iniciada.
+- Tarefas com código aplicado até agora: **P0-02** (commitada), **P1-01** (commitada), **P1-02** (pendente de commit). **Discovery mínimo Company → Stock está completo** — nenhuma tarefa deste roadmap continua exigindo SQL manual para o ciclo `login → empresa → estoque`. Nenhuma outra tarefa foi iniciada.
 - **P0-01 permanece parcialmente concluída** — as decisões humanas foram tomadas (r3/r4); falta registrar `docs/pilot-decisions.md` formalmente e resolver as decisões nº 5–10 de §13 (a nº 5, máximo de itens por DANFE, é a que bloqueia P4-01).
 - Nenhum serviço foi provisionado: não há conta, projeto ou deploy criado no Render, no Neon ou no Google. As decisões estão registradas; a execução é P5.
 - Nenhum valor foi inventado para decisão em aberto: máximo de itens por DANFE, coorte, janela, retenção, `PATCH /me/password` e o prazo de guarda do `AuditLog` seguem sem número. Os limites reais do Free Tier do Gemini **não foram estimados** — são gate operacional.
-- `docs/backlog-engenharia.md`, `docs/auditoria-tecnica.md`, `docs/implementation-progress.md` **não foram modificados** — M5-02 e as bandas de M6-02 permanecem com o status que já tinham; este documento apenas descreve a estratégia para desbloqueá-las. `README.md` **foi atualizado** em P0-02 e em P1-01, para refletir comportamento HTTP real (convenção do projeto: código e documentação nunca divergem).
-- **Nesta rodada (P1-01): nenhum commit e nenhum push foram feitos.** As alterações de P1-01 estão no working tree, aguardando revisão do checkpoint.
+- `docs/backlog-engenharia.md`, `docs/auditoria-tecnica.md`, `docs/implementation-progress.md` **não foram modificados** — M5-02 e as bandas de M6-02 permanecem com o status que já tinham; este documento apenas descreve a estratégia para desbloqueá-las. `README.md` **foi atualizado** em P0-02, P1-01 e P1-02, para refletir comportamento HTTP real (convenção do projeto: código e documentação nunca divergem).
+- **Nesta rodada (P1-02): nenhum commit e nenhum push foram feitos.** As alterações de P1-02 estão no working tree, aguardando revisão do checkpoint.
 
-O estado do repositório é: `main` em `cfa6ca3` (1 commit à frente de `origin/main`, P0-02), mais o working tree desta rodada com a implementação de P1-01 não commitada.
+O estado do repositório é: `main` em `d02236e` (2 commits à frente de `origin/main`: `cfa6ca3` P0-02, `d02236e` P1-01), mais o working tree desta rodada com a implementação de P1-02 não commitada.

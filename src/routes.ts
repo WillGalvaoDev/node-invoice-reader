@@ -24,6 +24,8 @@ import { ListProductsUseCase } from './use-cases/list-products/list-products.use
 import { ListProductsController } from './controllers/list-products.controller.js';
 import { ListCompaniesUseCase } from './use-cases/list-companies/list-companies.use-case.js';
 import { ListCompaniesController } from './controllers/list-companies.controller.js';
+import { ListCompanyStocksUseCase } from './use-cases/list-company-stocks/list-company-stocks.use-case.js';
+import { ListCompanyStocksController } from './controllers/list-company-stocks.controller.js';
 
 // EMPRESAS
 import { CreateCompanyUseCase } from './use-cases/create-company/create-company.use-case.js';
@@ -35,8 +37,10 @@ import { invoiceUpload } from './middlewares/invoice-upload.js';
 import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
 import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
 import {
+  companyStocksParamsSchema,
   createCompanyBodySchema,
   listCompaniesQuerySchema,
+  listCompanyStocksQuerySchema,
   listProductsQuerySchema,
   loginBodySchema,
   registerUserBodySchema,
@@ -69,6 +73,7 @@ export interface CreateRoutesOptions {
     login: HttpController;
     createCompany: HttpController;
     listCompanies: HttpController;
+    listCompanyStocks: HttpController;
     listProducts: HttpController;
     uploadInvoice: HttpController;
     confirmSuggestion: HttpController;
@@ -86,6 +91,7 @@ export function createRoutes(options: CreateRoutesOptions) {
   router.get('/products', options.authenticate, validateQuery(listProductsQuerySchema), controllers.listProducts.handle.bind(controllers.listProducts));
   router.post('/companies', options.authenticate, validateBody(createCompanyBodySchema), controllers.createCompany.handle.bind(controllers.createCompany));
   router.get('/companies', options.authenticate, validateQuery(listCompaniesQuerySchema), controllers.listCompanies.handle.bind(controllers.listCompanies));
+  router.get('/companies/:companyId/stocks', options.authenticate, validateParams(companyStocksParamsSchema), validateQuery(listCompanyStocksQuerySchema), controllers.listCompanyStocks.handle.bind(controllers.listCompanyStocks));
   router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
   router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
   router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
@@ -137,6 +143,7 @@ const createCompanyUseCase = new CreateCompanyUseCase(
 );
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
 const listCompaniesController = new ListCompaniesController(new ListCompaniesUseCase(companyRepository));
+const listCompanyStocksController = new ListCompanyStocksController(new ListCompanyStocksUseCase(companyRepository, stockRepository));
 const confirmSuggestionController = new ConfirmProductSuggestionController(
   new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository),
 );
@@ -158,6 +165,7 @@ export const routes = createRoutes({
     login: loginController,
     createCompany: createCompanyController,
     listCompanies: listCompaniesController,
+    listCompanyStocks: listCompanyStocksController,
     listProducts: listProductsController,
     uploadInvoice: uploadInvoiceController,
     confirmSuggestion: confirmSuggestionController,

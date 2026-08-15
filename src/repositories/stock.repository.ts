@@ -5,10 +5,23 @@ export interface IStock {
   createdAt?: Date;
 }
 
+export interface IStockPageQuery {
+  companyId: string;
+  userId: string;
+  limit: number;
+  cursor?: string | undefined;
+}
+
+export interface IStockPage {
+  items: IStock[];
+  nextCursor: string | null;
+}
+
 export interface IStockRepository {
   create(stock: IStock): Promise<IStock>;
   findById(id: string): Promise<IStock | null>;
   findByIdForUser(id: string, userId: string): Promise<IStock | null>;
   findByIdForViewer(id: string, userId: string): Promise<IStock | null>;
-  findByCompanyId(companyId: string): Promise<IStock[]>;
+  // Owner vê todos; colaborador só os estoques com StockPermission.canView (P1-02).
+  findViewablePageByCompanyId(query: IStockPageQuery): Promise<IStockPage>;
 }

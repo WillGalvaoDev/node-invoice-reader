@@ -74,12 +74,23 @@ export class PrismaStockRepository {
         });
         return stock ? StockMapper.toDomain(stock) : null;
     }
-    async findByCompanyId(companyId) {
+    // Owner tem acesso implícito a todo estoque da própria empresa, sem depender de
+    // StockPermission; colaborador só através de canView (P1-02).
+    async findViewablePageByCompanyId({ companyId, userId, limit, cursor }) {
         const stocks = await prisma.stock.findMany({
-            where: { companyId },
-            orderBy: { createdAt: 'desc' },
+            where: {
+                companyId,
+                OR: [
+                    { company: { ownerId: userId } },
+                    { permissions: { some: { canView: true, collaborator: { userId } } } },
+                ],
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: limit + 1,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         });
-        return stocks.map(StockMapper.toDomain);
+        const items = stocks.slice(0, limit).map(StockMapper.toDomain);
+        return { items, nextCursor: stocks.length > limit ? items.at(-1)?.id ?? null : null };
     }
 }
 //# sourceMappingURL=prisma-stock.repository.js.map

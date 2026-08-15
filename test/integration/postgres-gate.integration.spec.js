@@ -12,6 +12,7 @@ import { ConfirmProductSuggestionUseCase } from '../../src/use-cases/product-sug
 import { RejectProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListProductsUseCase } from '../../src/use-cases/list-products/list-products.use-case.js';
 import { ListCompaniesUseCase } from '../../src/use-cases/list-companies/list-companies.use-case.js';
+import { ListCompanyStocksUseCase } from '../../src/use-cases/list-company-stocks/list-company-stocks.use-case.js';
 import express from 'express';
 import { createApp } from '../../src/app.js';
 import { checkDatabaseHealth } from '../../src/infra/health.js';
@@ -734,6 +735,83 @@ describe('PostgreSQL Integration Gate', () => {
             .rejects.toMatchObject({ statusCode: 400 });
         const findManySpy = vi.spyOn(prisma.company, 'findMany');
         const page = await useCase.execute({ userId: owner.id, limit: 50 });
+        expect(page.items).toHaveLength(5);
+        expect(findManySpy).toHaveBeenCalledTimes(1);
+        findManySpy.mockRestore();
+    });
+    it('P1-02: GET /companies/:companyId/stocks — owner vê tudo sem StockPermission, collaborator só o permitido, outsider recebe 404', async () => {
+        const { owner, company, stock } = await seedOwnerAndStock();
+        const secondStock = await prisma.stock.create({ data: { name: 'Estoque B', companyId: company.id } });
+        const collaborator = await prisma.user.create({ data: { email: `stocks-collab-${crypto.randomUUID()}@test.local`, name: 'Collaborator', password: 'hash' } });
+        const outsider = await prisma.user.create({ data: { email: `stocks-outsider-${crypto.randomUUID()}@test.local`, name: 'Outsider', password: 'hash' } });
+        const membership = await prisma.companyCollaborator.create({ data: { companyId: company.id, userId: collaborator.id } });
+        await prisma.stockPermission.create({ data: { collaboratorId: membership.id, stockId: stock.id, canView: true } });
+        // secondStock não recebe nenhuma StockPermission para o collaborator — ele não deve aparecer.
+        const useCase = new ListCompanyStocksUseCase(new PrismaCompanyRepository(), new PrismaStockRepository());
+        // Owner vê os dois estoques sem que nenhuma StockPermission exista para ele (prova #17).
+        const ownerPage = await useCase.execute({ userId: owner.id, companyId: company.id, limit: 50 });
+        expect(ownerPage.items.map((item) => item.id).sort()).toEqual([secondStock.id, stock.id].sort());
+        expect(ownerPage.items[0]).not.toHaveProperty('companyId');
+        // Collaborator só vê o estoque com canView explícito.
+        const collaboratorPage = await useCase.execute({ userId: collaborator.id, companyId: company.id, limit: 50 });
+        expect(collaboratorPage.items.map((item) => item.id)).toEqual([stock.id]);
+        // Outsider sem nenhuma relação com a empresa recebe 404.
+        await expect(useCase.execute({ userId: outsider.id, companyId: company.id, limit: 50 }))
+            .rejects.toMatchObject({ statusCode: 404 });
+    });
+    it('P1-02: collaborator sem nenhum canView recebe lista vazia (CompanyCollaborator sozinho não dá acesso a estoque)', async () => {
+        const { company, stock } = await seedOwnerAndStock();
+        const collaborator = await prisma.user.create({ data: { email: `stocks-empty-${crypto.randomUUID()}@test.local`, name: 'Collaborator', password: 'hash' } });
+        await prisma.companyCollaborator.create({ data: { companyId: company.id, userId: collaborator.id } });
+        void stock;
+        const useCase = new ListCompanyStocksUseCase(new PrismaCompanyRepository(), new PrismaStockRepository());
+        const page = await useCase.execute({ userId: collaborator.id, companyId: company.id, limit: 50 });
+        expect(page.items).toEqual([]);
+    });
+    it('P1-02: isolamento cross-company — collaborator com canView em estoque de outra empresa não vê nada aqui', async () => {
+        const { company, stock } = await seedOwnerAndStock();
+        const otherOwner = await prisma.user.create({ data: { email: `stocks-other-owner-${crypto.randomUUID()}@test.local`, name: 'Other Owner', password: 'hash' } });
+        const otherCompany = await prisma.company.create({ data: { name: 'Outra empresa', cnpj: crypto.randomUUID().replaceAll('-', '').slice(0, 14), ownerId: otherOwner.id } });
+        const otherStock = await prisma.stock.create({ data: { name: 'Estoque de outra empresa', companyId: otherCompany.id } });
+        void stock;
+        const useCase = new ListCompanyStocksUseCase(new PrismaCompanyRepository(), new PrismaStockRepository());
+        // otherOwner não tem nenhuma relação com `company` -> 404, mesmo tendo estoque em outra empresa.
+        await expect(useCase.execute({ userId: otherOwner.id, companyId: company.id, limit: 50 }))
+            .rejects.toMatchObject({ statusCode: 404 });
+        const ownPage = await useCase.execute({ userId: otherOwner.id, companyId: otherCompany.id, limit: 50 });
+        expect(ownPage.items.map((item) => item.id)).toEqual([otherStock.id]);
+    });
+    it('P1-02: pagina por cursor com ordenação estável, rejeita cursor inacessível e de outra empresa, e resolve sem N+1', async () => {
+        const { owner, company } = await seedOwnerAndStock();
+        const otherOwner = await prisma.user.create({ data: { email: `stocks-page-other-${crypto.randomUUID()}@test.local`, name: 'Other Owner', password: 'hash' } });
+        const otherCompany = await prisma.company.create({ data: { name: 'Outra empresa', cnpj: crypto.randomUUID().replaceAll('-', '').slice(0, 14), ownerId: otherOwner.id } });
+        const otherStock = await prisma.stock.create({ data: { name: 'Estoque de outra empresa', companyId: otherCompany.id } });
+        const collaborator = await prisma.user.create({ data: { email: `stocks-page-collab-${crypto.randomUUID()}@test.local`, name: 'Collaborator', password: 'hash' } });
+        await prisma.companyCollaborator.create({ data: { companyId: company.id, userId: collaborator.id } });
+        // seedOwnerAndStock já cria 1 estoque nesta empresa; +4 aqui totalizam os 5 esperados no teste.
+        const sameDate = new Date('2026-01-01T00:00:00Z');
+        const created = [];
+        for (let index = 0; index < 4; index += 1) {
+            created.push(await prisma.stock.create({ data: { name: `Estoque ${index}`, companyId: company.id, createdAt: sameDate } }));
+        }
+        const inaccessibleForCollaborator = created[0];
+        const useCase = new ListCompanyStocksUseCase(new PrismaCompanyRepository(), new PrismaStockRepository());
+        const first = await useCase.execute({ userId: owner.id, companyId: company.id, limit: 2 });
+        const second = await useCase.execute({ userId: owner.id, companyId: company.id, limit: 2, cursor: first.nextCursor });
+        const third = await useCase.execute({ userId: owner.id, companyId: company.id, limit: 2, cursor: second.nextCursor });
+        expect([first.items.length, second.items.length, third.items.length]).toEqual([2, 2, 1]);
+        expect(third.nextCursor).toBeNull();
+        const ids = [...first.items, ...second.items, ...third.items].map((item) => item.id);
+        expect(new Set(ids).size).toBe(5);
+        await expect(useCase.execute({ userId: owner.id, companyId: company.id, limit: 50, cursor: 'missing-stock' }))
+            .rejects.toMatchObject({ statusCode: 400 });
+        await expect(useCase.execute({ userId: owner.id, companyId: company.id, limit: 50, cursor: otherStock.id }))
+            .rejects.toMatchObject({ statusCode: 400 });
+        // collaborator sem canView em nenhum estoque desta empresa: cursor de estoque real, porém inacessível a ele.
+        await expect(useCase.execute({ userId: collaborator.id, companyId: company.id, limit: 50, cursor: inaccessibleForCollaborator.id }))
+            .rejects.toMatchObject({ statusCode: 400 });
+        const findManySpy = vi.spyOn(prisma.stock, 'findMany');
+        const page = await useCase.execute({ userId: owner.id, companyId: company.id, limit: 50 });
         expect(page.items).toHaveLength(5);
         expect(findManySpy).toHaveBeenCalledTimes(1);
         findManySpy.mockRestore();

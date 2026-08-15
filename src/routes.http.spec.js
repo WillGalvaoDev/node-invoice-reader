@@ -8,6 +8,7 @@ import { LoginController } from './controllers/login.controller.js';
 import { CreateCompanyController } from './controllers/create-company.controller.js';
 import { ListProductsController } from './controllers/list-products.controller.js';
 import { ListCompaniesController } from './controllers/list-companies.controller.js';
+import { ListCompanyStocksController } from './controllers/list-company-stocks.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
 import { ConfirmProductSuggestionController, RejectProductSuggestionController, ListPendingProductSuggestionsController, } from './controllers/product-suggestion.controllers.js';
 import { invoiceUpload } from './middlewares/invoice-upload.js';
@@ -15,6 +16,7 @@ import { AppError } from './errors/app-error.js';
 const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const stockId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const suggestionId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const companyId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 const pass = (request, _response, next) => {
     request.user = { id: userId };
@@ -27,6 +29,7 @@ describe('HTTP route matrix with injected use cases', () => {
     const login = vi.fn();
     const createCompany = vi.fn();
     const listCompanies = vi.fn();
+    const listCompanyStocks = vi.fn();
     const listProducts = vi.fn();
     const readInvoice = vi.fn();
     const confirmSuggestion = vi.fn();
@@ -45,6 +48,7 @@ describe('HTTP route matrix with injected use cases', () => {
                 login: new LoginController({ execute: login }),
                 createCompany: new CreateCompanyController({ execute: createCompany }),
                 listCompanies: new ListCompaniesController({ execute: listCompanies }),
+                listCompanyStocks: new ListCompanyStocksController({ execute: listCompanyStocks }),
                 listProducts: new ListProductsController({ execute: listProducts }),
                 uploadInvoice: new UploadInvoiceController({ execute: readInvoice }, { readFile: vi.fn(), deleteFile }),
                 confirmSuggestion: new ConfirmProductSuggestionController({ execute: confirmSuggestion }),
@@ -67,6 +71,7 @@ describe('HTTP route matrix with injected use cases', () => {
         login.mockResolvedValue({ token: 'jwt-token' });
         createCompany.mockResolvedValue({ company: { id: 'company-1' }, defaultStock: { id: stockId } });
         listCompanies.mockResolvedValue({ items: [{ id: 'company-1', name: 'Empresa', cnpj: '11222333000181', createdAt: new Date('2026-01-01'), role: 'OWNER' }], nextCursor: null });
+        listCompanyStocks.mockResolvedValue({ items: [{ id: stockId, name: 'Estoque Principal', createdAt: new Date('2026-01-01') }], nextCursor: null });
         listProducts.mockResolvedValue({ items: [{ id: 'product-1' }], nextCursor: 'next-product' });
         readInvoice.mockImplementation(async ({ filePath }) => {
             await unlink(filePath);
@@ -133,6 +138,22 @@ describe('HTTP route matrix with injected use cases', () => {
         });
         expect(listCompanies).toHaveBeenCalledWith({ userId, limit: 50 });
     });
+    it('GET /companies/:companyId/stocks encaminha identidade confiável, request ID e devolve envelope paginado', async () => {
+        const response = await fetch(`${baseUrl}/companies/${companyId}/stocks`, {
+            headers: { 'x-request-id': 'company-stocks-request' },
+        });
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({
+            status: 'success',
+            data: {
+                items: [{ id: stockId, name: 'Estoque Principal', createdAt: '2026-01-01T00:00:00.000Z' }],
+                nextCursor: null,
+            },
+        });
+        expect(listCompanyStocks).toHaveBeenCalledWith({
+            userId, companyId, limit: 50, cursor: undefined, requestId: 'company-stocks-request',
+        });
+    });
     it('GET /products encaminha paginação e devolve envelope paginado', async () => {
         const response = await fetch(`${baseUrl}/products?stockId=${stockId}&limit=2&cursor=${suggestionId}`);
         expect(response.status).toBe(200);
@@ -168,10 +189,13 @@ describe('HTTP route matrix with injected use cases', () => {
         expect((await jsonPost('/users', { name: 'X', email: 'bad', password: 'short', admin: true })).status).toBe(400);
         expect((await fetch(`${baseUrl}/products?stockId=invalid&limit=201`)).status).toBe(400);
         expect((await fetch(`${baseUrl}/companies?limit=201`)).status).toBe(400);
+        expect((await fetch(`${baseUrl}/companies/not-uuid/stocks`)).status).toBe(400);
+        expect((await fetch(`${baseUrl}/companies/${companyId}/stocks?limit=201`)).status).toBe(400);
         expect((await fetch(`${baseUrl}/stocks/not-uuid/suggestions`)).status).toBe(400);
         expect((await jsonPost(`/suggestions/${suggestionId}/confirm`, { productId: stockId })).status).toBe(400);
         expect(registerUser).not.toHaveBeenCalled();
         expect(listCompanies).not.toHaveBeenCalled();
+        expect(listCompanyStocks).not.toHaveBeenCalled();
         expect(listProducts).not.toHaveBeenCalled();
         expect(listSuggestions).not.toHaveBeenCalled();
         expect(confirmSuggestion).not.toHaveBeenCalled();

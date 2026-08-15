@@ -32,6 +32,13 @@ export const listCompaniesQuerySchema = z.strictObject({
   cursor: idSchema.optional(),
 });
 
+export const companyStocksParamsSchema = z.strictObject({ companyId: idSchema });
+
+export const listCompanyStocksQuerySchema = z.strictObject({
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(200)).default(50),
+  cursor: idSchema.optional(),
+});
+
 export const uploadInvoiceBodySchema = z.strictObject({
   stockId: idSchema,
 });

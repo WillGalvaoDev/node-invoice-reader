@@ -1,4 +1,4 @@
-import type { IStockRepository, IStock } from './stock.repository.js';
+import type { IStockRepository, IStock, IStockPage, IStockPageQuery } from './stock.repository.js';
 import { prisma } from '../infra/prisma.js';
 import { AppError } from '../errors/app-error.js';
 import { isPrismaErrorCode } from '../errors/prisma-error.js';
@@ -82,12 +82,22 @@ export class PrismaStockRepository implements IStockRepository {
     return stock ? StockMapper.toDomain(stock) : null;
   }
 
-  async findByCompanyId(companyId: string): Promise<IStock[]> {
+  // Owner tem acesso implícito a todo estoque da própria empresa, sem depender de
+  // StockPermission; colaborador só através de canView (P1-02).
+  async findViewablePageByCompanyId({ companyId, userId, limit, cursor }: IStockPageQuery): Promise<IStockPage> {
     const stocks = await prisma.stock.findMany({
-      where: { companyId },
-      orderBy: { createdAt: 'desc' },
+      where: {
+        companyId,
+        OR: [
+          { company: { ownerId: userId } },
+          { permissions: { some: { canView: true, collaborator: { userId } } } },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-
-    return stocks.map(StockMapper.toDomain);
+    const items = stocks.slice(0, limit).map(StockMapper.toDomain);
+    return { items, nextCursor: stocks.length > limit ? items.at(-1)?.id ?? null : null };
   }
 }

@@ -47,6 +47,7 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | `POST` | `/login` | pública, rate limit 10/15min por IP | Autenticação; devolve JWT. |
 | `POST` | `/companies` | Bearer JWT | Cria empresa + estoque principal em uma transação atômica. |
 | `GET`  | `/companies` | Bearer JWT | Lista paginada (cursor) das empresas acessíveis ao usuário — owned e onde ele é colaborador —, com o papel (`OWNER`/`COLLABORATOR`) de cada uma. |
+| `GET`  | `/companies/:companyId/stocks` | Bearer JWT | Lista paginada (cursor) dos estoques visíveis da empresa. Owner vê todos; colaborador só os que têm `StockPermission.canView = true`. `404` (sem distinguir "não existe" de "sem acesso") se o usuário não tiver nenhuma relação com a empresa. |
 | `GET`  | `/products` | Bearer JWT | Lista paginada (cursor) por `stockId`. Exige acesso ao estoque. |
 | `POST` | `/invoices/upload` | Bearer JWT, rate limit 5/min por usuário | Upload de DANFE (JPEG/PNG/PDF, até 10 MiB). Dispara o pipeline completo. `503` se o matching ficar indisponível — nada é gravado e a nota pode ser reenviada. |
 | `GET`  | `/stocks/:stockId/suggestions` | Bearer JWT | Lista sugestões de produto pendentes do estoque. |

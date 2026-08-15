@@ -13,6 +13,7 @@ export interface CreateRoutesOptions {
         login: HttpController;
         createCompany: HttpController;
         listCompanies: HttpController;
+        listCompanyStocks: HttpController;
         listProducts: HttpController;
         uploadInvoice: HttpController;
         confirmSuggestion: HttpController;
