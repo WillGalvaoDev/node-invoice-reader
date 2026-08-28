@@ -1,15 +1,18 @@
 import type { AuditAction, Prisma } from '@prisma/client';
-import type { IAuditLogRepository, IAuditLog } from './audit-log.repository.js';
+import type { IAuditLogRepository, IAuditLog, AuditLogWrite } from './audit-log.repository.js';
+import { assertAuditLogWrite } from './audit-log.repository.js';
 import { prisma } from '../infra/prisma.js';
 import { AuditLogMapper } from '../mappers/audit-log.mapper.js';
 
 export class PrismaAuditLogRepository implements IAuditLogRepository {
-  async create(log: IAuditLog): Promise<IAuditLog> {
+  async create(log: AuditLogWrite): Promise<IAuditLog> {
+    // Última fronteira antes do banco: nada é escrito se o evento não for válido.
+    assertAuditLogWrite(log);
+
     const data: Prisma.AuditLogUncheckedCreateInput = {
       action: log.action as AuditAction,
       entity: log.entity,
       ...(log.entityId && { entityId: log.entityId }),
-      ...(log.details && { details: log.details }),
       ...(log.userId && { userId: log.userId }),
       ...(log.companyId && { companyId: log.companyId }),
       ...(log.stockId && { stockId: log.stockId }),

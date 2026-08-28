@@ -9,6 +9,7 @@ import type { IInvoicePersistenceRepository, IInvoiceProductOperation } from '..
 import type { DanfeMimeType } from '../../config/upload.js';
 import { logger, type Logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
+import { auditEvents } from '../audit-events.js';
 import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.js';
 import { randomUUID } from 'node:crypto';
 import type { IInvoiceSuggestionOperation } from '../../repositories/invoice-persistence.repository.js';
@@ -69,14 +70,6 @@ export class ReadInvoiceUseCase {
       : this.aiProvider.findSimilarProduct(description, candidates);
   }
 
-  private productAuditState(product: IProduct) {
-    return {
-      quantity: product.quantity,
-      unitPrice: product.unitPrice,
-      totalPrice: product.totalPrice,
-    };
-  }
-
   async execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
     try {
       const authorizedStock = userId
@@ -89,13 +82,10 @@ export class ReadInvoiceUseCase {
           repository: this.auditLogRepository,
           logger: this.applicationLogger,
           requestId,
-          log: {
-            action: 'UNAUTHORIZED_ACCESS',
-            entity: 'INVOICE',
-            description: 'Tentativa de acesso não autorizado ao estoque.',
+          log: auditEvents.invoiceUnauthorizedAccess({
             ...(userId && { userId }),
             ...(requestedStock && { stockId: requestedStock.id, companyId: requestedStock.companyId }),
-          },
+          }),
         });
 
         throw new AppError('Acesso não autorizado ao estoque informado.', 403);
@@ -252,20 +242,14 @@ export class ReadInvoiceUseCase {
         repository: this.auditLogRepository,
         logger: this.applicationLogger,
         requestId,
-        log: {
-          action: 'CREATE',
-          entity: 'INVOICE',
-          entityId: extractedData.accessKey,
-          description: 'Invoice processada com sucesso.',
+        log: auditEvents.invoiceProcessed({
           ...(userId && { userId }),
           companyId: authorizedStock.companyId,
           stockId,
-          previousState: null,
-          newState: {
-            processedProductCount: operations.length,
-            pendingSuggestionCount: suggestions.length,
-          },
-        },
+          accessKey: extractedData.accessKey,
+          processedProductCount: operations.length,
+          pendingSuggestionCount: suggestions.length,
+        }),
       });
 
       for (const [index, operation] of operations.entries()) {
@@ -277,17 +261,14 @@ export class ReadInvoiceUseCase {
           repository: this.auditLogRepository,
           logger: this.applicationLogger,
           requestId,
-          log: {
-            action: previousProduct ? 'UPDATE' : 'CREATE',
-            entity: 'PRODUCT',
-            entityId: persistedProduct.id,
-            description: 'Entrada de estoque processada por invoice.',
+          log: auditEvents.productEntry({
             ...(userId && { userId }),
             companyId: authorizedStock.companyId,
             stockId,
-            previousState: previousProduct ? this.productAuditState(previousProduct) : null,
-            newState: this.productAuditState(persistedProduct),
-          },
+            productId: persistedProduct.id,
+            previous: previousProduct ?? null,
+            next: persistedProduct,
+          }),
         });
 
         auditStateByProductCode.set(operation.product.code, persistedProduct);

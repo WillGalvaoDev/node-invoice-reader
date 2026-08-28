@@ -1,7 +1,7 @@
-import type { IAuditLog, IAuditLogRepository } from '../audit-log.repository.js';
+import type { IAuditLog, IAuditLogRepository, AuditLogWrite } from '../audit-log.repository.js';
 export declare class InMemoryAuditLogRepository implements IAuditLogRepository {
     items: IAuditLog[];
-    create(log: IAuditLog): Promise<IAuditLog>;
+    create(log: AuditLogWrite): Promise<IAuditLog>;
     findByCompanyId(companyId: string): Promise<IAuditLog[]>;
     findByUserId(userId: string): Promise<IAuditLog[]>;
 }

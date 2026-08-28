@@ -4,6 +4,7 @@ import { PrismaInvoicePersistenceRepository } from '../../src/repositories/prism
 import { PrismaProductRepository } from '../../src/repositories/prisma-product.repository.js';
 import { PrismaStockRepository } from '../../src/repositories/prisma-stock.repository.js';
 import { PrismaAuditLogRepository } from '../../src/repositories/prisma-audit-log.repository.js';
+import { auditEvents } from '../../src/use-cases/audit-events.js';
 import { ReadInvoiceUseCase } from '../../src/use-cases/read-invoice/read-invoice.use-case.js';
 import { AppError } from '../../src/errors/app-error.js';
 import type { IAiProvider, IDanfeExtractResult } from '../../src/providers/ai.provider.js';
@@ -786,14 +787,18 @@ describe('PostgreSQL Integration Gate', () => {
     const { owner, company, stock } = await seedOwnerAndStock();
     const auditLogRepository = new PrismaAuditLogRepository();
 
-    await auditLogRepository.create({
-      action: 'UPDATE', entity: 'PRODUCT', entityId: 'product-1',
-      userId: owner.id, companyId: company.id, stockId: stock.id,
-      description: 'Entrada de estoque processada por invoice.',
-      previousState: { quantity: 10, unitPrice: 5, totalPrice: 50 },
-      newState: { quantity: 15, unitPrice: 10, totalPrice: 150 },
+    await auditLogRepository.create(auditEvents.productEntry({
+      userId: owner.id, companyId: company.id, stockId: stock.id, productId: 'product-1',
+      previous: { quantity: 10, unitPrice: 5, totalPrice: 50 },
+      next: { quantity: 15, unitPrice: 10, totalPrice: 150 },
+    }));
+    await auditLogRepository.create(auditEvents.invoiceUnauthorizedAccess({}));
+
+    // Linha legada: `description`/`details` nulos são colunas que a escrita nova
+    // (P3-00B) nunca mais produz, mas que o mapper continua tendo de ler.
+    await prisma.auditLog.create({
+      data: { action: 'READ', entity: 'LEGACY', description: null, details: null },
     });
-    await auditLogRepository.create({ action: 'UNAUTHORIZED_ACCESS', entity: 'INVOICE' });
 
     const byCompany = await auditLogRepository.findByCompanyId(company.id);
     expect(byCompany).toHaveLength(1);

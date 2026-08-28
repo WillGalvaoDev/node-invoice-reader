@@ -1,0 +1,59 @@
+/** Único ponto do sistema que produz a marca de escrita — deliberadamente um só. */
+const sealed = (event) => event;
+/** Extrai só os três números: um `IProduct` inteiro entra, nada além disso sai. */
+function figures({ quantity, unitPrice, totalPrice }) {
+    return { quantity, unitPrice, totalPrice };
+}
+export const auditEvents = {
+    companyCreated({ userId, companyId, stockId, defaultStockId }) {
+        return sealed({
+            action: 'CREATE',
+            entity: 'COMPANY',
+            entityId: companyId,
+            description: 'Empresa criada com estoque principal.',
+            userId,
+            companyId,
+            ...(stockId && { stockId }),
+            previousState: null,
+            newState: { companyId, defaultStockId },
+        });
+    },
+    invoiceUnauthorizedAccess({ userId, stockId, companyId }) {
+        return sealed({
+            action: 'UNAUTHORIZED_ACCESS',
+            entity: 'INVOICE',
+            description: 'Tentativa de acesso não autorizado ao estoque.',
+            ...(userId && { userId }),
+            ...(stockId && { stockId }),
+            ...(companyId && { companyId }),
+        });
+    },
+    invoiceProcessed({ userId, companyId, stockId, accessKey, processedProductCount, pendingSuggestionCount }) {
+        return sealed({
+            action: 'CREATE',
+            entity: 'INVOICE',
+            entityId: accessKey,
+            description: 'Invoice processada com sucesso.',
+            ...(userId && { userId }),
+            companyId,
+            stockId,
+            previousState: null,
+            newState: { processedProductCount, pendingSuggestionCount },
+        });
+    },
+    /** `previous === null` significa produto novo; caso contrário, entrada sobre saldo existente. */
+    productEntry({ userId, companyId, stockId, productId, previous, next }) {
+        return sealed({
+            action: previous ? 'UPDATE' : 'CREATE',
+            entity: 'PRODUCT',
+            entityId: productId,
+            description: 'Entrada de estoque processada por invoice.',
+            ...(userId && { userId }),
+            companyId,
+            stockId,
+            previousState: previous ? figures(previous) : null,
+            newState: figures(next),
+        });
+    },
+};
+//# sourceMappingURL=audit-events.js.map

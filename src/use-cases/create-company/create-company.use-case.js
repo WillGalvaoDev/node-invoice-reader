@@ -1,6 +1,7 @@
 import { AppError } from '../../errors/app-error.js';
 import { logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
+import { auditEvents } from '../audit-events.js';
 import { parseCnpj } from '../../domain/cnpj.js';
 const DEFAULT_STOCK_NAME = 'Estoque Principal';
 export class CreateCompanyUseCase {
@@ -37,17 +38,12 @@ export class CreateCompanyUseCase {
             repository: this.auditLogRepository,
             logger: this.applicationLogger,
             requestId,
-            log: {
-                action: 'CREATE',
-                entity: 'COMPANY',
-                entityId: company.id,
-                description: 'Empresa criada com estoque principal.',
+            log: auditEvents.companyCreated({
                 userId: ownerId,
                 companyId: company.id,
                 ...(defaultStock.id && { stockId: defaultStock.id }),
-                previousState: null,
-                newState: { companyId: company.id, defaultStockId: defaultStock.id ?? null },
-            },
+                defaultStockId: defaultStock.id ?? null,
+            }),
         });
         return {
             company,

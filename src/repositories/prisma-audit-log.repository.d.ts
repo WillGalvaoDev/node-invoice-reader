@@ -1,6 +1,6 @@
-import type { IAuditLogRepository, IAuditLog } from './audit-log.repository.js';
+import type { IAuditLogRepository, IAuditLog, AuditLogWrite } from './audit-log.repository.js';
 export declare class PrismaAuditLogRepository implements IAuditLogRepository {
-    create(log: IAuditLog): Promise<IAuditLog>;
+    create(log: AuditLogWrite): Promise<IAuditLog>;
     findByCompanyId(companyId: string): Promise<IAuditLog[]>;
     findByUserId(userId: string): Promise<IAuditLog[]>;
 }

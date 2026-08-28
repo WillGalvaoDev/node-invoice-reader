@@ -39,7 +39,6 @@ export declare class ReadInvoiceUseCase {
     constructor(storageProvider: IStorageProvider, aiProvider: IAiProvider, productRepository: IProductRepository, auditLogRepository: IAuditLogRepository, stockRepository: IStockRepository, invoicePersistenceRepository: IInvoicePersistenceRepository, applicationLogger?: Logger, telemetry?: IAiTelemetry);
     private sanitizeString;
     private findSimilarProduct;
-    private productAuditState;
     execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse>;
 }
 export {};
