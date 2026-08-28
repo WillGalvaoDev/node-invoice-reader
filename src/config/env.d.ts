@@ -12,6 +12,7 @@ export declare function createEnv(environment: Environment): {
     REQUEST_TIMEOUT_MS: number;
     SHUTDOWN_TIMEOUT_MS: number;
     SIMILARITY_CONFIDENCE_THRESHOLD: number;
+    DANFE_MAX_ITEMS: number;
 };
 export declare const env: {
     DATABASE_URL: string;
@@ -25,6 +26,7 @@ export declare const env: {
     REQUEST_TIMEOUT_MS: number;
     SHUTDOWN_TIMEOUT_MS: number;
     SIMILARITY_CONFIDENCE_THRESHOLD: number;
+    DANFE_MAX_ITEMS: number;
 };
 export {};
 //# sourceMappingURL=env.d.ts.map

@@ -5,7 +5,7 @@ import type { IProduct } from '../repositories/product.repository.js';
 import { AppError } from '../errors/app-error.js';
 import { env } from '../config/env.js';
 import { isDanfeMimeType, type DanfeMimeType } from '../config/upload.js';
-import { danfeResponseSchema, similarityResponseSchema } from '../schemas/gemini.schemas.js';
+import { createDanfeResponseSchema, similarityResponseSchema } from '../schemas/gemini.schemas.js';
 import { performance } from 'node:perf_hooks';
 import {
   aiTelemetry,
@@ -182,8 +182,14 @@ export class GeminiAiProvider implements IAiProvider {
   }
 
   private parseDanfeResponse(text: string | undefined): IDanfeExtractResult {
-    const result = danfeResponseSchema.safeParse(this.parseJson(text));
+    const result = createDanfeResponseSchema(env.DANFE_MAX_ITEMS).safeParse(this.parseJson(text));
     if (!result.success) {
+      const exceedsMaxItems = result.error.issues.some(
+        (issue) => issue.code === 'too_big' && issue.path[0] === 'products',
+      );
+      if (exceedsMaxItems) {
+        throw new AppError(`O DANFE contém mais itens do que o limite permitido (${env.DANFE_MAX_ITEMS}).`, 422);
+      }
       throw new AppError('O serviço de IA retornou dados incompatíveis com um DANFE.', 422);
     }
     return result.data;
@@ -230,6 +236,9 @@ export class GeminiAiProvider implements IAiProvider {
         },
         products: {
           type: Type.ARRAY,
+          // Mesma fonte de env.DANFE_MAX_ITEMS usada em parseDanfeResponse (P4-01, D1):
+          // o modelo não gasta tokens gerando itens que seriam rejeitados de qualquer forma.
+          maxItems: String(env.DANFE_MAX_ITEMS),
           items: {
             type: Type.OBJECT,
             properties: {

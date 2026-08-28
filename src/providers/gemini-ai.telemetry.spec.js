@@ -7,7 +7,7 @@ vi.mock('@google/genai', () => ({
     Type: { OBJECT: 'OBJECT', STRING: 'STRING', NUMBER: 'NUMBER', ARRAY: 'ARRAY', BOOLEAN: 'BOOLEAN' },
 }));
 vi.mock('../config/env.js', () => ({
-    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7 },
+    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7, DANFE_MAX_ITEMS: 100 },
 }));
 const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
 const fileContent = Buffer.from('document');

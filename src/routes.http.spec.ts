@@ -231,6 +231,18 @@ describe('HTTP route matrix with injected use cases', () => {
     expect(readInvoice).not.toHaveBeenCalled();
   });
 
+  it('POST /invoices/upload traduz excesso de itens por DANFE (P4-01) para 422 via AppError', async () => {
+    readInvoice.mockRejectedValueOnce(new AppError('O DANFE contém mais itens do que o limite permitido (100).', 422));
+    const form = new FormData();
+    form.append('stockId', stockId);
+    form.append('file', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }), 'danfe.png');
+    const response = await fetch(`${baseUrl}/invoices/upload`, { method: 'POST', body: form });
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      status: 'error', message: 'O DANFE contém mais itens do que o limite permitido (100).',
+    });
+  });
+
   it('prova boundaries Zod de body, query, param e command vazio antes dos use cases', async () => {
     expect((await jsonPost('/users', { name: 'X', email: 'bad', password: 'short', admin: true })).status).toBe(400);
     expect((await fetch(`${baseUrl}/products?stockId=invalid&limit=201`)).status).toBe(400);

@@ -9,6 +9,7 @@ import type { IStockRepository } from '../../repositories/stock.repository.js';
 import type { IInvoicePersistenceRepository } from '../../repositories/invoice-persistence.repository.js';
 import type { Logger } from '../../infra/logger.js';
 import type { IAiTelemetry } from '../../infra/ai-telemetry.js';
+import { AppError } from '../../errors/app-error.js';
 
 describe('ReadInvoiceUseCase', () => {
   let storageProviderMock: Mocked<IStorageProvider>;
@@ -332,6 +333,20 @@ describe('ReadInvoiceUseCase', () => {
 
     expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
     expect(productRepositoryMock.save).not.toHaveBeenCalled();
+  });
+
+  it('propaga a rejeição por excesso de itens (P4-01) sem chamar similarity nem persistir nada', async () => {
+    aiProviderMock.extractDanfeData.mockRejectedValueOnce(
+      new AppError('O DANFE contém mais itens do que o limite permitido (100).', 422)
+    );
+
+    await expect(
+      sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' })
+    ).rejects.toMatchObject({ statusCode: 422 });
+
+    expect(aiProviderMock.findSimilarProduct).not.toHaveBeenCalled();
+    expect(productRepositoryMock.save).not.toHaveBeenCalled();
+    expect(storageProviderMock.deleteFile).toHaveBeenCalledWith('/path/nota.png');
   });
 
   it('deve rejeitar produtos com valores ou quantidades negativas/zeradas retornadas pela IA', async () => {

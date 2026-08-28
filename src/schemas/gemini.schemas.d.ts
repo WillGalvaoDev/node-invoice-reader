@@ -1,5 +1,5 @@
 import { z } from 'zod';
-export declare const danfeResponseSchema: z.ZodObject<{
+export declare function createDanfeResponseSchema(maxItems: number): z.ZodObject<{
     accessKey: z.ZodString;
     invoiceNumber: z.ZodString;
     series: z.ZodString;

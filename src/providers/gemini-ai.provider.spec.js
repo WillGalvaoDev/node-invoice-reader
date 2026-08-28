@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const generateContent = vi.hoisted(() => vi.fn());
 vi.mock('@google/genai', () => ({
     GoogleGenAI: class {
@@ -7,9 +7,10 @@ vi.mock('@google/genai', () => ({
     Type: { OBJECT: 'OBJECT', STRING: 'STRING', NUMBER: 'NUMBER', ARRAY: 'ARRAY', BOOLEAN: 'BOOLEAN' },
 }));
 vi.mock('../config/env.js', () => ({
-    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7 },
+    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7, DANFE_MAX_ITEMS: 100 },
 }));
 const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
+const { env } = await import('../config/env.js');
 const fileContent = Buffer.from('document');
 describe('GeminiAiProvider file MIME', () => {
     const validDanfe = {
@@ -240,6 +241,43 @@ describe('GeminiAiProvider file MIME', () => {
                 matchFound: true, matchedProductId: 'p1', confidence: 0.9, reason: 'same', extra: 'ignored',
             }) });
         await expect(new GeminiAiProvider().findSimilarProduct('A', [product])).resolves.toMatchObject({ confidence: 0.9 });
+    });
+    describe('teto de itens por DANFE (P4-01, D1)', () => {
+        const originalMaxItems = env.DANFE_MAX_ITEMS;
+        afterEach(() => {
+            env.DANFE_MAX_ITEMS = originalMaxItems;
+        });
+        function danfeWithProducts(count) {
+            return {
+                ...validDanfe,
+                products: Array.from({ length: count }, (_, index) => ({
+                    code: `P${index}`, description: `Produto ${index}`,
+                    quantity: 1, unitPrice: 10, totalPrice: 10, unitMeasurement: 'UN',
+                })),
+            };
+        }
+        it('aceita nota com exatamente N itens', async () => {
+            env.DANFE_MAX_ITEMS = 2;
+            generateContent.mockResolvedValueOnce({ text: JSON.stringify(danfeWithProducts(2)) });
+            await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
+                .resolves.toMatchObject({ products: expect.arrayContaining([expect.anything(), expect.anything()]) });
+        });
+        it('recusa nota com N+1 itens, com 422 e mensagem clara, sem chamada de similaridade', async () => {
+            env.DANFE_MAX_ITEMS = 2;
+            generateContent.mockResolvedValueOnce({ text: JSON.stringify(danfeWithProducts(3)) });
+            await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
+                .rejects.toMatchObject({ statusCode: 422, message: expect.stringContaining('2') });
+            // extractDanfeData rejeita sozinho — o loop de similaridade em
+            // ReadInvoiceUseCase nunca chega a rodar porque nunca recebe os dados.
+            expect(generateContent).toHaveBeenCalledTimes(1);
+        });
+        it('envia maxItems ao Gemini no mesmo valor de DANFE_MAX_ITEMS — fonte única, como o limiar de similaridade', async () => {
+            env.DANFE_MAX_ITEMS = 7;
+            generateContent.mockResolvedValueOnce({ text: JSON.stringify(validDanfe) });
+            await new GeminiAiProvider().extractDanfeData(fileContent, 'image/png');
+            const requestBody = generateContent.mock.calls[0]?.[0];
+            expect(requestBody.config.responseSchema.properties.products.maxItems).toBe('7');
+        });
     });
 });
 //# sourceMappingURL=gemini-ai.provider.spec.js.map

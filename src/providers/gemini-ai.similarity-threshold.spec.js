@@ -9,7 +9,7 @@ vi.mock('@google/genai', () => ({
 // Limiar deliberadamente diferente do default (0.7) para provar que prompt e decisão em
 // código derivam da mesma fonte configurada (M6-02), não de um "0.70" hardcoded em dois lugares.
 vi.mock('../config/env.js', () => ({
-    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.85 },
+    env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.85, DANFE_MAX_ITEMS: 100 },
 }));
 const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
 describe('GeminiAiProvider limiar de confiança configurável (M6-02)', () => {

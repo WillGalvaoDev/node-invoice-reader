@@ -99,6 +99,9 @@ export function createEnv(environment: Environment) {
     SHUTDOWN_TIMEOUT_MS: parseIntegerInRange(environment.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 1_000, 120_000),
     // Fonte única do limiar de similaridade: mesmo valor usado no prompt e na decisão em código (M6-02).
     SIMILARITY_CONFIDENCE_THRESHOLD: parseDecimalInRange(environment.SIMILARITY_CONFIDENCE_THRESHOLD, 0.7, 'SIMILARITY_CONFIDENCE_THRESHOLD', 0, 1),
+    // Teto operacional do piloto (D1, docs/pilot-decisions.md), não regra fiscal.
+    // Fonte única: mesmo valor usado no maxItems do prompt e na validação do schema (P4-01).
+    DANFE_MAX_ITEMS: parseIntegerInRange(environment.DANFE_MAX_ITEMS, 100, 'DANFE_MAX_ITEMS', 1, 1000),
   };
 }
 

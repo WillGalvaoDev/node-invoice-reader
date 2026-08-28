@@ -49,7 +49,7 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | `GET`  | `/companies` | Bearer JWT | Lista paginada (cursor) das empresas acessíveis ao usuário — owned e onde ele é colaborador —, com o papel (`OWNER`/`COLLABORATOR`) de cada uma. |
 | `GET`  | `/companies/:companyId/stocks` | Bearer JWT | Lista paginada (cursor) dos estoques visíveis da empresa. Owner vê todos; colaborador só os que têm `StockPermission.canView = true`. `404` (sem distinguir "não existe" de "sem acesso") se o usuário não tiver nenhuma relação com a empresa. |
 | `GET`  | `/products` | Bearer JWT | Lista paginada (cursor) por `stockId`. Exige acesso ao estoque. |
-| `POST` | `/invoices/upload` | Bearer JWT, rate limit 5/min por usuário | Upload de DANFE (JPEG/PNG/PDF, até 10 MiB). Dispara o pipeline completo. `503` se o matching ficar indisponível — nada é gravado e a nota pode ser reenviada. |
+| `POST` | `/invoices/upload` | Bearer JWT, rate limit 5/min por usuário | Upload de DANFE (JPEG/PNG/PDF, até 10 MiB, até `DANFE_MAX_ITEMS` linhas de produto). Dispara o pipeline completo. `422` se exceder o teto de itens, `503` se o matching ficar indisponível — nada é gravado e a nota pode ser reenviada. |
 | `GET`  | `/stocks/:stockId/suggestions` | Bearer JWT | Lista sugestões de produto pendentes do estoque. |
 | `POST` | `/suggestions/:suggestionId/confirm` | Bearer JWT | Confirma uma sugestão: aplica a entrada no produto sugerido. |
 | `POST` | `/suggestions/:suggestionId/reject` | Bearer JWT | Rejeita uma sugestão: cadastra o item como produto novo. |
@@ -130,6 +130,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 | `GEMINI_TIMEOUT_MS` | não | `30000` | Timeout por tentativa ao Gemini. |
 | `GEMINI_MAX_ATTEMPTS` | não | `2` | Tentativas totais (1–2) para erro transitório. |
 | `SIMILARITY_CONFIDENCE_THRESHOLD` | não | `0.7` | Limiar de confiança do matching por similaridade (0–1). Fonte única usada no prompt e no código — não alterar sem dado real de uso. |
+| `DANFE_MAX_ITEMS` | não | `100` | Máximo de linhas de produto aceitas por DANFE (1–1000). Teto operacional do piloto (D1), não regra fiscal — fonte única usada no `maxItems` do prompt e na validação do schema. Acima do limite, `422` antes de qualquer chamada de similaridade. |
 
 ---
 

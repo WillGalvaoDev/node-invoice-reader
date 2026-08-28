@@ -48,6 +48,7 @@ describe('configuração da aplicação', () => {
       REQUEST_TIMEOUT_MS: 120_000,
       SHUTDOWN_TIMEOUT_MS: 30_000,
       SIMILARITY_CONFIDENCE_THRESHOLD: 0.7,
+      DANFE_MAX_ITEMS: 100,
     });
   });
 
@@ -114,6 +115,22 @@ describe('configuração da aplicação', () => {
     expect(createEnv({ ...required, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
     expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '-1' })).toThrow('TRUST_PROXY_HOPS');
     expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '11' })).toThrow('TRUST_PROXY_HOPS');
+  });
+
+  it('limita itens por DANFE com default 100 (D1) e valida a faixa 1-1000', async () => {
+    const { createEnv } = await import('./env.js');
+    const required = {
+      DATABASE_URL: 'postgresql://localhost/docscan',
+      JWT_SECRET: VALID_JWT_SECRET,
+      GEMINI_API_KEY: 'gemini-key',
+    };
+
+    expect(createEnv(required).DANFE_MAX_ITEMS).toBe(100);
+    expect(createEnv({ ...required, DANFE_MAX_ITEMS: '1' }).DANFE_MAX_ITEMS).toBe(1);
+    expect(createEnv({ ...required, DANFE_MAX_ITEMS: '1000' }).DANFE_MAX_ITEMS).toBe(1000);
+    expect(() => createEnv({ ...required, DANFE_MAX_ITEMS: '0' })).toThrow('DANFE_MAX_ITEMS');
+    expect(() => createEnv({ ...required, DANFE_MAX_ITEMS: '1001' })).toThrow('DANFE_MAX_ITEMS');
+    expect(() => createEnv({ ...required, DANFE_MAX_ITEMS: 'abc' })).toThrow('DANFE_MAX_ITEMS');
   });
 
   it('centraliza o limiar de confiança de similaridade com default 0.7 e valida a faixa 0-1', async () => {
