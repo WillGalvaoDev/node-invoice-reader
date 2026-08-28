@@ -17,7 +17,7 @@ if (!databaseName.includes('test')) {
     throw new Error('TEST_DATABASE_URL recusada: o nome do banco deve identificá-lo inequivocamente como teste.');
 }
 process.env.DATABASE_URL = testDatabaseUrl;
-process.env.JWT_SECRET ||= 'integration-test-jwt-secret';
+process.env.JWT_SECRET ||= 'integration-test-jwt-secret-32-chars-min';
 process.env.GEMINI_API_KEY ||= 'integration-test-gemini-key';
 export {};
 //# sourceMappingURL=setup.js.map

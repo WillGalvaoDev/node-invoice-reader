@@ -10,6 +10,16 @@ function required(environment: Environment, name: string): string {
   return value;
 }
 
+const JWT_SECRET_MIN_LENGTH = 32;
+
+function requireJwtSecret(environment: Environment): string {
+  const value = required(environment, 'JWT_SECRET');
+  if (value.length < JWT_SECRET_MIN_LENGTH) {
+    throw new Error(`Variável de ambiente inválida: JWT_SECRET deve ter no mínimo ${JWT_SECRET_MIN_LENGTH} caracteres.`);
+  }
+  return value;
+}
+
 function parsePort(value: string | undefined): number {
   if (value === undefined || value.trim() === '') return 3333;
 
@@ -78,7 +88,7 @@ function parseCorsAllowedOrigins(value: string | undefined): string[] {
 export function createEnv(environment: Environment) {
   return {
     DATABASE_URL: required(environment, 'DATABASE_URL'),
-    JWT_SECRET: required(environment, 'JWT_SECRET'),
+    JWT_SECRET: requireJwtSecret(environment),
     GEMINI_API_KEY: required(environment, 'GEMINI_API_KEY'),
     PORT: parsePort(environment.PORT),
     GEMINI_TIMEOUT_MS: parseIntegerInRange(environment.GEMINI_TIMEOUT_MS, 30_000, 'GEMINI_TIMEOUT_MS', 1_000, 30_000),

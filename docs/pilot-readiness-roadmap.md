@@ -711,6 +711,18 @@ A alternativa A é a mais conservadora disponível e a de menor superfície: ela
 
 ### P2-01 · Exigir entropia mínima de `JWT_SECRET`
 
+**Status: CONCLUÍDA em 2026-08-28.**
+
+**Evidência de validação.** RED: `env.spec.ts` ganhou um `describe` dedicado (`entropia mínima de JWT_SECRET`) com 6 casos — ausente, vazio, 1 caractere, 31 caracteres, exatamente 32, 64, e um caso específico provando que a mensagem de erro não reproduz o segredo recebido. Os dois casos de comprimento (31/32) falharam contra a implementação anterior (`Variável de ambiente inválida: JWT_SECRET` nunca lançada), confirmando o gap.
+
+GREEN: `requireJwtSecret` em `src/config/env.ts` — reaproveita `required()` para ausência/vazio e adiciona um `JWT_SECRET_MIN_LENGTH = 32` com a mesma convenção de mensagem (`Variável de ambiente inválida: …`) das demais variáveis. `createEnv` passou a usar `requireJwtSecret` no lugar de `required(environment, 'JWT_SECRET')` — único ponto de validação, sem duplicação em controller/middleware.
+
+**Segredos de teste/CI ajustados** (nenhum secret real): `test/integration/setup.ts` e `scripts/postgres-integration.mjs` (`integration-test-jwt-secret` → `integration-test-jwt-secret-32-chars-min`), `.github/workflows/ci.yml` job `verify` (`ci-only-jwt-secret` → `ci-only-jwt-secret-32-chars-minimum-ok`). O job `production-runtime` já usava `runtime-check-secret-not-for-production` (39 caracteres) — sem alteração necessária.
+
+Validação completa: `prisma generate`/`validate` aprovados · `typecheck` limpo · `lint` 0 problemas · suíte **330/330** · `build` · `verify:production` · `git diff --check` limpo. PostgreSQL Integration Gate não executado — tarefa é de configuração/auth, sem tocar persistência ou schema.
+
+**Nota operacional descoberta durante a execução:** os artefatos compilados (`.js`/`.d.ts`) commitados junto do `.ts` ficam desatualizados após editar o fonte, e o Vitest resolve `import('./env.js')` para o arquivo compilado real em vez do `.ts` quando ambos existem no disco — `npm run build` é obrigatório entre editar `.ts` e rodar a suíte (já documentado no README, seção "Decisões arquiteturais deliberadas"; ver P5-06 para o portão de CI que impede esse artefato de divergir sem ser notado).
+
 **Problema.** `env.ts:81` valida `JWT_SECRET` apenas como string não vazia. `JWT_SECRET=a` sobe a aplicação. HS256 com segredo curto é atacável offline a partir de **um único token capturado**, e um segredo quebrado significa personificação de qualquer usuário — o comprometimento total do modelo de autorização, já que toda autorização deriva de `req.user.id`.
 
 **Objetivo.** Tornar impossível subir o serviço com um segredo de assinatura fraco.
@@ -1909,7 +1921,7 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | 2 | **P0-02** ✅ | **Única correção de defeito do roadmap.** Cada dia sem ela é um dia em que uma falha do Gemini pode sujar um catálogo. Também precede P3, para que a telemetria meça o pipeline correto. Concluída, commitada (`cfa6ca3`). |
 | 3 | **P1-01** ✅ | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova. Concluída, pendente de commit desta rodada. |
 | 4 | **P1-02** ✅ | Fecha o gargalo do `stockId` e completa o ciclo pela API. Concluída, pendente de commit desta rodada. |
-| 5 | **P2-01** | S, segurança, sem dependência; precisa preceder a geração do segredo de produção |
+| 5 | **P2-01** ✅ | S, segurança, sem dependência; precisa preceder a geração do segredo de produção. Concluída, pendente de commit desta rodada. |
 | 6 | **P5-06** | S, independente; garante que tudo daqui em diante é verificável |
 | 7 | **P4-01** | S; remove a cauda ilimitada antes de existir orçamento a proteger |
 | 8 | **P5-01** | **Início do caminho crítico.** Antecipado em r2: é a primeira das três **M** encadeadas até P6-01, e a que mais atrasa o resto se escorregar. |

@@ -119,7 +119,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 | Variável | Obrigatória | Default | Descrição |
 |---|---|---|---|
 | `DATABASE_URL` | sim | — | Postgres. |
-| `JWT_SECRET` | sim | — | Assinatura dos tokens. |
+| `JWT_SECRET` | sim | — | Assinatura dos tokens (HS256). Mínimo de **32 caracteres** — o boot falha abaixo disso. Gerar com `openssl rand -base64 48`. |
 | `GEMINI_API_KEY` | sim | — | Google Gemini. |
 | `PORT` | não | `3333` | Porta HTTP. |
 | `TRUST_PROXY_HOPS` | não | `0` | Número exato de proxies reversos confiáveis (0–10). Só alterar se a API estiver atrás de proxy conhecido. |
@@ -163,7 +163,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 
 ```bash
 npm ci
-cp .env.example .env   # preencher DATABASE_URL, JWT_SECRET, GEMINI_API_KEY
+cp .env.example .env   # preencher DATABASE_URL, JWT_SECRET (>= 32 caracteres, ex.: `openssl rand -base64 48`), GEMINI_API_KEY
 npm run prisma:generate
 npm run dev             # tsx watch, recarrega em mudanças
 ```

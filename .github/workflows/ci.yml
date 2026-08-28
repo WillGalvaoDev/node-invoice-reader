@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/docscan_ci
-      JWT_SECRET: ci-only-jwt-secret
+      JWT_SECRET: ci-only-jwt-secret-32-chars-minimum-ok
       GEMINI_API_KEY: ci-only-gemini-key
     steps:
       - uses: actions/checkout@v4

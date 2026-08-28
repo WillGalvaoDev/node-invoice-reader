@@ -21,6 +21,6 @@ if (!databaseName.includes('test')) {
 }
 
 process.env.DATABASE_URL = testDatabaseUrl;
-process.env.JWT_SECRET ||= 'integration-test-jwt-secret';
+process.env.JWT_SECRET ||= 'integration-test-jwt-secret-32-chars-min';
 process.env.GEMINI_API_KEY ||= 'integration-test-gemini-key';
 

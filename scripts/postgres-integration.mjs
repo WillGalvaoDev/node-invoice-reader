@@ -6,7 +6,7 @@ const childEnvironment = {
   ...process.env,
   TEST_DATABASE_URL: testDatabaseUrl,
   DATABASE_URL: testDatabaseUrl,
-  JWT_SECRET: process.env.JWT_SECRET || 'integration-test-jwt-secret',
+  JWT_SECRET: process.env.JWT_SECRET || 'integration-test-jwt-secret-32-chars-min',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || 'integration-test-gemini-key',
 };
 

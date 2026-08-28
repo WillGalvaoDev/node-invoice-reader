@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('dotenv/config', () => ({}));
 
+const VALID_JWT_SECRET = 'test-jwt-secret-32-characters-minimum';
+
 describe('configuração da aplicação', () => {
   beforeEach(() => {
     vi.stubEnv('DATABASE_URL', 'postgresql://localhost/docscan');
-    vi.stubEnv('JWT_SECRET', 'jwt-secret');
+    vi.stubEnv('JWT_SECRET', VALID_JWT_SECRET);
     vi.stubEnv('GEMINI_API_KEY', 'gemini-key');
   });
 
@@ -19,7 +21,7 @@ describe('configuração da aplicação', () => {
     expect(() =>
       createEnv({
         DATABASE_URL: 'postgresql://localhost/docscan',
-        JWT_SECRET: 'jwt-secret',
+        JWT_SECRET: VALID_JWT_SECRET,
       })
     ).toThrow('Variável de ambiente obrigatória ausente: GEMINI_API_KEY');
   });
@@ -30,13 +32,13 @@ describe('configuração da aplicação', () => {
     expect(
       createEnv({
         DATABASE_URL: 'postgresql://localhost/docscan',
-        JWT_SECRET: 'jwt-secret',
+        JWT_SECRET: VALID_JWT_SECRET,
         GEMINI_API_KEY: 'gemini-key',
         PORT: '4000',
       })
     ).toEqual({
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
       PORT: 4000,
       GEMINI_TIMEOUT_MS: 30_000,
@@ -53,7 +55,7 @@ describe('configuração da aplicação', () => {
     const { createEnv } = await import('./env.js');
     const required = {
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
     };
 
@@ -69,7 +71,7 @@ describe('configuração da aplicação', () => {
     const { createEnv } = await import('./env.js');
     const required = {
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
     };
 
@@ -86,7 +88,7 @@ describe('configuração da aplicação', () => {
     const { createEnv } = await import('./env.js');
     const required = {
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
     };
 
@@ -104,7 +106,7 @@ describe('configuração da aplicação', () => {
     const { createEnv } = await import('./env.js');
     const required = {
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
     };
 
@@ -118,7 +120,7 @@ describe('configuração da aplicação', () => {
     const { createEnv } = await import('./env.js');
     const required = {
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
     };
 
@@ -138,7 +140,7 @@ describe('configuração da aplicação', () => {
     const { createEnv } = await import('./env.js');
     const required = {
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
     };
 
@@ -161,9 +163,74 @@ describe('configuração da aplicação', () => {
 
     expect(() => createEnv({
       DATABASE_URL: 'postgresql://localhost/docscan',
-      JWT_SECRET: 'jwt-secret',
+      JWT_SECRET: VALID_JWT_SECRET,
       GEMINI_API_KEY: 'gemini-key',
       CORS_ALLOWED_ORIGINS: value,
     })).toThrow('CORS_ALLOWED_ORIGINS');
+  });
+
+  describe('entropia mínima de JWT_SECRET', () => {
+    const required = {
+      DATABASE_URL: 'postgresql://localhost/docscan',
+      GEMINI_API_KEY: 'gemini-key',
+    };
+
+    it('falha quando JWT_SECRET está ausente', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(() => createEnv({ ...required })).toThrow(
+        'Variável de ambiente obrigatória ausente: JWT_SECRET'
+      );
+    });
+
+    it('falha quando JWT_SECRET está vazio', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(() => createEnv({ ...required, JWT_SECRET: '' })).toThrow(
+        'Variável de ambiente obrigatória ausente: JWT_SECRET'
+      );
+    });
+
+    it('falha quando JWT_SECRET tem entre 1 e 31 caracteres', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(() => createEnv({ ...required, JWT_SECRET: 'a' })).toThrow(
+        'Variável de ambiente inválida: JWT_SECRET'
+      );
+      expect(() => createEnv({ ...required, JWT_SECRET: 'a'.repeat(31) })).toThrow(
+        'Variável de ambiente inválida: JWT_SECRET'
+      );
+    });
+
+    it('aceita JWT_SECRET com exatamente 32 caracteres', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(createEnv({ ...required, JWT_SECRET: 'a'.repeat(32) }).JWT_SECRET).toBe(
+        'a'.repeat(32)
+      );
+    });
+
+    it('aceita JWT_SECRET com mais de 32 caracteres', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(createEnv({ ...required, JWT_SECRET: 'a'.repeat(64) }).JWT_SECRET).toBe(
+        'a'.repeat(64)
+      );
+    });
+
+    it('não reproduz o valor de JWT_SECRET recebido na mensagem de erro', async () => {
+      const { createEnv } = await import('./env.js');
+      const shortSecret = 'super-secret-value-too-short';
+
+      let thrown: unknown;
+      try {
+        createEnv({ ...required, JWT_SECRET: shortSecret });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).not.toContain(shortSecret);
+    });
   });
 });
