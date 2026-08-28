@@ -1425,6 +1425,16 @@ Se P2-02 **não** entrar no piloto, o script ainda funciona (redefine a senha), 
 
 ### P5-06 · Impedir deploy de artefato compilado obsoleto
 
+**Status: CONCLUÍDA em 2026-08-28.**
+
+**Evidência de validação.** RED: em `src/config/trust-proxy.ts`, uma linha de comentário foi adicionada sem regenerar `trust-proxy.js`; rodar `npm run build` reescreveu `trust-proxy.js`/`.d.ts.map`/`.js.map` a partir do `.ts` alterado, e `git status --porcelain` (a lógica do guard) mostrou os quatro arquivos divergentes do commit — prova de que o build produz uma diferença detectável quando fonte e artefato saem de sincronia. GREEN: alteração revertida (`git checkout -- src/config/trust-proxy.ts`), `npm run build` executado de novo, `git status --porcelain` voltou a vazio. A alteração artificial não permaneceu na árvore de trabalho.
+
+**Decisão de desenho: `git status --porcelain`, não `git diff --exit-code`.** A descrição original desta tarefa sugeria `git diff --exit-code`, que cobre artefato *modificado*. Mas `git diff` (sem `--`) não enxerga arquivo **novo e não rastreado** — o caso de um `.ts` novo cujo `.js`/`.d.ts` nunca chegou a ser gerado/commitado, que é a mesma classe de defeito (artefato commitado, ou ausente, divergente do fonte) e está dentro do objetivo declarado ("qualquer outro artefato compilado versionado pelo projeto"). `git status --porcelain` cobre os dois casos com o mesmo comando, sem lista manual de extensões.
+
+**Novo script:** `scripts/verify-build-artifacts.mjs` (`npm run verify:artifacts`) — roda `git status --porcelain` via `spawnSync`, falha com a lista de arquivos divergentes e uma instrução (`rode npm run build antes de commit`) se houver qualquer entrada; passa silenciosamente (mensagem de sucesso) se a árvore estiver limpa. Adicionado ao job `verify` do CI, logo após `lint` e antes de `npm test` — falha rápido, antes do custo da suíte e do gate PostgreSQL, e evita duplicar a checagem no job `production-runtime` (que já builda, mas serve a um propósito diferente: validar o grafo de dependências só com `dependencies`).
+
+**Ruído CRLF local (Windows) não afeta o CI.** No ambiente de desenvolvimento (`core.autocrlf=true` do Git para Windows, configuração global da máquina, não do repositório), `prisma.config.*`/`vitest*.config.*` aparecem como modificados após qualquer `npm run build`, mesmo sem alteração real — confirmado com `git diff --stat` retornando vazio para esses arquivos apesar do `git status` marcá-los como `M`. GitHub Actions roda `ubuntu-latest`, onde essa conversão não acontece; o guard não precisou de nenhuma exceção para esses arquivos porque o problema é exclusivamente local. Nenhum `.gitattributes` foi adicionado — o CLAUDE.md pede o comportamento correto do CI, não a normalização de quirks locais do Windows.
+
 **Problema.** `tsc` emite ao lado do fonte e os `.js` são commitados; `npm start` executa `node src/index.js`. Um `.ts` alterado sem rebuild produz um artefato divergente do fonte, sem erro. O próprio README alerta que a suíte pode resolver o arquivo compilado desatualizado — ou seja, o risco já se materializou nos testes e nada impede que se materialize em produção.
 
 **Objetivo.** É impossível que o artefato commitado divirja do fonte sem o CI acusar.
@@ -1717,7 +1727,7 @@ O roadmap está concluído quando **todas** as linhas abaixo forem verdadeiras e
 - [ ] `npm run build`
 - [ ] `npm run verify:production`
 - [ ] CI Linux verde nos dois jobs
-- [ ] **Artefato compilado consistente com o fonte** (P5-06)
+- [x] **Artefato compilado consistente com o fonte** (P5-06)
 - [ ] Documentação sincronizada: README com as rotas novas, `.env.example` com as variáveis novas, backlog anterior intocado
 
 **Portão de ambiente** *(concretizado para Render + Neon em r3)*
@@ -1922,7 +1932,7 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | 3 | **P1-01** ✅ | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova. Concluída, pendente de commit desta rodada. |
 | 4 | **P1-02** ✅ | Fecha o gargalo do `stockId` e completa o ciclo pela API. Concluída, pendente de commit desta rodada. |
 | 5 | **P2-01** ✅ | S, segurança, sem dependência; precisa preceder a geração do segredo de produção. Concluída, pendente de commit desta rodada. |
-| 6 | **P5-06** | S, independente; garante que tudo daqui em diante é verificável |
+| 6 | **P5-06** ✅ | S, independente; garante que tudo daqui em diante é verificável. Concluída, pendente de commit desta rodada. |
 | 7 | **P4-01** | S; remove a cauda ilimitada antes de existir orçamento a proteger |
 | 8 | **P5-01** | **Início do caminho crítico.** Antecipado em r2: é a primeira das três **M** encadeadas até P6-01, e a que mais atrasa o resto se escorregar. |
 | 9 | **P5-02** | Exige o ambiente de P5-01; consome o `JWT_SECRET` sob a regra de P2-01 |

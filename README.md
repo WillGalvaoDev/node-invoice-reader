@@ -108,7 +108,7 @@ Um único `PrismaClient`/`Pool` (`src/infra/prisma.ts`, `max: 10`) compartilhado
 
 * **Graceful shutdown**: `SIGTERM`/`SIGINT` drenam requisições em voo, encerram o pool do Postgres e saem com código 0; timeout configurável força o fechamento e sai com código 1.
 * **`unhandledRejection`/`uncaughtException`** são logados com contexto seguro e disparam o mesmo shutdown fatal.
-* **CI** (`.github/workflows/ci.yml`, GitHub Actions, `ubuntu-latest`): `prisma validate` → `prisma generate` → `typecheck` → `lint` → suíte unitária → gate de integração PostgreSQL real (Docker); job separado valida o build de produção com **apenas** `dependencies` instaladas (`npm prune --omit=dev`) e roda `scripts/verify-production-runtime.mjs`, que importa o grafo de dependências real do artefato compilado.
+* **CI** (`.github/workflows/ci.yml`, GitHub Actions, `ubuntu-latest`): `prisma validate` → `prisma generate` → `typecheck` → `lint` → `build` → **guard de artefatos** (`npm run verify:artifacts`, falha se o build sujar o checkout) → suíte unitária → gate de integração PostgreSQL real (Docker); job separado valida o build de produção com **apenas** `dependencies` instaladas (`npm prune --omit=dev`) e roda `scripts/verify-production-runtime.mjs`, que importa o grafo de dependências real do artefato compilado.
 
 ---
 
@@ -149,7 +149,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 * **Indisponibilidade da IA nunca vira decisão de domínio.** O resultado da similaridade é uma união discriminada de três estados, e não `null`, justamente para que o compilador impeça `unavailable` de ser lido como `no_match`. Uma falha de transporte não pode criar produto no catálogo do cliente.
 * **Auditoria não tem endpoint de leitura HTTP hoje.** `IAuditLogRepository.findByCompanyId`/`findByUserId` existem, são testados e indexados, mas não há rota que os exponha — decisão deliberada de manter o escopo da API restrito ao fluxo operacional até haver necessidade real de um endpoint de auditoria.
 * **`AuditLog` não tem política de retenção automática.** Decisão conservadora: nenhuma exclusão automática até haver requisito legal/de negócio definido para o prazo de guarda de dado fiscal.
-* **Artefatos de build (`.js`/`.d.ts`) são commitados junto do `.ts`.** Os testes importam por caminho `.js` (convenção `nodenext`); rode `npm run build` após editar `.ts` antes de rodar a suíte, ou o Vitest pode resolver o arquivo compilado desatualizado em vez do fonte.
+* **Artefatos de build (`.js`/`.d.ts`) são commitados junto do `.ts`.** Os testes importam por caminho `.js` (convenção `nodenext`); rode `npm run build` após editar `.ts` **antes de commitar** — ou o Vitest pode resolver o arquivo compilado desatualizado em vez do fonte, e o CI recusa o merge (`npm run verify:artifacts`, P5-06): o guard roda o build a partir do checkout limpo e falha se ele sujar qualquer artefato versionado, usando `git status --porcelain` como fonte de verdade em vez de uma lista manual de arquivos.
 
 ## Limitações conhecidas
 

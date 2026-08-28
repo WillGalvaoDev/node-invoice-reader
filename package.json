@@ -17,7 +17,8 @@
     "prisma:validate": "prisma validate",
     "lint": "eslint .",
     "start": "node src/index.js",
-    "verify:production": "node scripts/verify-production-runtime.mjs"
+    "verify:production": "node scripts/verify-production-runtime.mjs",
+    "verify:artifacts": "node scripts/verify-build-artifacts.mjs"
   },
   "keywords": [],
   "author": "",
