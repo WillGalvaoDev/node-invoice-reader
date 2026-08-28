@@ -14,6 +14,9 @@
 | **r4** | **§13-A RESOLVIDA.** Free Tier passa a ser o tier de **desenvolvimento privado**; **Paid Tier é gate operacional antes do piloto externo com DANFE real**. Consequências: P4-02 desenhado para **dois modos** (A free / B paid) com o mesmo mecanismo; P3 e P3-04 preparados para os dois estágios; novo **gate REAL-DOCUMENT AI TIER** antes de P6-01. Custo variável de IA passa a ser aceito a partir do piloto real; R$ 0 fixo permanece para Render + Neon. **P0-02 implementada e commitada** (`cfa6ca3`, TDD completo, 303/303 + Gate 31/31). |
 | **r5** | **P1-01 implementada e commitada** (`d02236e`). `GET /companies` com discovery por owner+colaborador, `role` derivado sem query extra, paginação por cursor no padrão de `/products`. `findByOwnerId` (sem chamador) removido em favor de `findAccessibleById`/`findAccessiblePageByUserId`. Suíte 303 → 315; Gate 31 → 33, com prova de ausência de N+1. |
 | **r6** | **P1-02 implementada** (não commitada nesta rodada). `GET /companies/:companyId/stocks`. `company access ≠ stock access`: gate de existência via `ICompanyRepository.findAccessibleById` (P1-01, 404 anti-enumeration), listagem via `IStockRepository.findViewablePageByCompanyId` — owner vê tudo sem depender de `StockPermission`, colaborador só `canView=true`. Cursor validado por reuso de `findByIdForViewer` (sem duplicar autorização). Paginação por cursor adotada por consistência com `/companies` e `/products`, **superando a nota "sem paginação" do rascunho original de P1-02** — ver a tarefa para a justificativa. `findByCompanyId` (sem chamador) removido. Suíte 315 → 330; Gate 33 → 37, com prova de ausência de N+1. **Discovery mínimo Company → Stock completo** — ver §17. |
+| **r7** | **P2-01 implementada e commitada** (`a1b2c0c`). `JWT_SECRET` passa a exigir mínimo de 32 caracteres em `createEnv`, fail-fast, sem vazar o valor na mensagem de erro. Segredos sintéticos de CI/integração ajustados para o novo mínimo. Suíte 330 → 336. |
+| **r8** | **P5-06 implementada e commitada** (`980624e`). Guard de artefato compilado no CI (`npm run verify:artifacts`, `scripts/verify-build-artifacts.mjs`): roda `npm run build` a partir do checkout limpo e falha se `git status --porcelain` reportar qualquer divergência — Git como fonte de verdade, sem lista manual de extensões. RED/GREEN provado com edição deliberada de `trust-proxy.ts` sem rebuild. |
+| **r9** | **P0-01 CONCLUÍDA (2026-08-28).** As sete decisões humanas restantes (D1–D7) tomadas pelo responsável do projeto e registradas em `docs/pilot-decisions.md`: máximo de 100 itens/DANFE (D1, destrava P4-01); retenção de `ai_call_events` em 60 dias (D2, destrava parte de P3-03); password management — troca **e** recuperação por e-mail — como Must have pré-piloto (D3, reclassifica P2-02, cria **P2-03** bloqueada pela escolha ainda não feita de provedor de e-mail); Gemini Free Tier no piloto sem budget USD arbitrário, Paid Tier comercial `DEFERRED_WITH_GATE` até valores explícitos (D4); teto de 200 usuários, não meta (D5); janela de 4 semanas (D6); `AuditLog` sem purga durante o piloto, prazo legal/comercial definitivo `DEFERRED_WITH_GATE` antes da comercialização, sem número inventado (D7). Duas tarefas novas de governança criadas a partir de investigação read-only de `AuditLog`: **P3-00A** (cobertura de auditoria de confirm/reject de sugestão, *Should have*) e **P3-00B** (barreira estrutural de payload do `AuditLog`, *Should have*, recomendada junto de P2-02). §14 reordenada. Nenhum código alterado nesta rodada — governança e documentação apenas. |
 
 ---
 
@@ -30,7 +33,7 @@ Seis conclusões que mudam a hipótese de roadmap apresentada:
 5. **`PATCH /me/password` não é bloqueador de piloto fechado.** O bloqueador real que ele *não* resolve é: um usuário que esquece a senha hoje tem a conta irrecuperável (não há reset, não há admin). A entrega obrigatória é um caminho de recuperação operado (script + runbook), não um endpoint de troca de senha. A revogação de token que ele destrava usa **`authVersion` inteiro no JWT**, não comparação de relógio.
 6. **`X-Request-Id` é aceito do cliente** (`src/middlewares/request-id.ts:8`). Usá-lo como chave de correlação de telemetria é inseguro: um cliente pode enviar o mesmo id em todas as requisições e colapsar toda a correlação de custo e de chamadas-por-nota. A correlação precisa de um identificador gerado no servidor.
 
-Com a restruturação proposta, o caminho até "piloto real controlado" tem **22 tarefas**, estimadas em **19–30 dias úteis** de execução, mais uma janela de observação de piloto de **2–4 semanas** em calendário.
+Com a restruturação proposta, o caminho até "piloto real controlado" tem **22 tarefas**, estimadas em **19–30 dias úteis** de execução, mais uma janela de observação de piloto de **4 semanas** em calendário (D6).
 
 **Acréscimo da r3 — as decisões de infraestrutura estão tomadas, e uma delas tem consequência não-óbvia.**
 
@@ -253,21 +256,23 @@ Isto é o defeito mais barato e mais grave do conjunto: duas rotas de leitura.
 
 ### 3.2 Autenticação — o que é bloqueador e o que não é
 
-| Item | Piloto fechado | Público aberto |
+**Substituído em 2026-08-28 por decisão humana explícita — D3 (`docs/pilot-decisions.md`).** A tabela e a argumentação abaixo eram a recomendação deste roadmap antes de D3; preservadas como registro do que foi recomendado e por quê, mas **não valem mais como classificação vigente**. O responsável humano do piloto decidiu que **troca de senha autenticada (P2-02) e recuperação por e-mail (P2-03) entram como requisito antes do piloto**, revertendo as duas linhas marcadas abaixo. A única parte que D3 não altera é a entropia de `JWT_SECRET` (já resolvida, P2-01 concluída).
+
+| Item | Piloto fechado — recomendação original (superada) | Piloto fechado — decisão vigente (D3) |
 |---|---|---|
-| Login + JWT 1d | **já atende** | atende |
-| Entropia mínima de `JWT_SECRET` | **necessário** — validação atual aceita `"a"` | necessário |
-| Troca de senha autenticada | desejável | necessário |
-| Recuperação de senha por e-mail | **não necessário** — ver abaixo | necessário |
-| Caminho de recuperação de conta travada | **necessário** (pode ser runbook) | insuficiente como runbook |
-| Revogação/logout | desejável, acoplado à troca de senha | necessário |
-| Verificação de e-mail | **não necessário** (coorte conhecida) | necessário |
-| Rate limit de login | já atende | precisa de store compartilhado se >1 instância |
-| Enumeração via `/users` 409 | aceitável | mitigar |
+| Login + JWT 1d | já atende | já atende |
+| Entropia mínima de `JWT_SECRET` | necessário | necessário — ✅ concluído (P2-01) |
+| Troca de senha autenticada | desejável (*Should have*) | **necessário — Must have (D3)**, ver P2-02 |
+| Recuperação de senha por e-mail | não necessário | **necessário — Must have (D3)**, ver P2-03 (bloqueada pela escolha de provedor de e-mail) |
+| Caminho de recuperação de conta travada | necessário (pode ser runbook) | necessário (runbook de P5-05 continua existindo como caminho de operador, agora complementar ao autosserviço de P2-03) |
+| Revogação/logout | desejável, acoplado à troca de senha | acoplado à troca de senha (P2-02), via `authVersion` |
+| Verificação de e-mail | não necessário (coorte conhecida) | não alterado por D3 — segue não necessário |
+| Rate limit de login | já atende | já atende |
+| Enumeração via `/users` 409 | aceitável | não alterado por D3 |
 
-**Sobre reset por e-mail: não é necessário no piloto fechado, e defendo isso concretamente.** Reset por e-mail exige provedor de e-mail, domínio verificado, template, tabela de tokens de uso único com expiração, rate limit próprio e proteção contra enumeração — um subsistema inteiro, com superfície de ataque própria, para uma coorte de poucas pessoas conhecidas nominalmente. O que o piloto realmente precisa é que **uma conta travada seja recuperável em minutos**, e isso um operador com acesso ao banco resolve com um script auditado. O gatilho para reset por e-mail é: coorte deixar de ser nominalmente conhecida, ou o operador não conseguir mais atender em tempo hábil.
+**Registro da recomendação original (superada), preservado para rastreabilidade.** Este roadmap recomendava não construir reset por e-mail no piloto fechado: um subsistema inteiro (provedor, domínio verificado, template, tokens de uso único, rate limit, antienumeração) para uma coorte pequena e nominalmente conhecida, quando um script de operador resolveria conta travada em minutos. O responsável humano avaliou o mesmo trade-off e decidiu diferente — priorizar autosserviço mesmo com o custo de um subsistema novo e a dependência (ainda em aberto) de escolher um provedor de e-mail. Essa é uma decisão de produto legítima que este roadmap não deve contestar depois de tomada; **D3 é agora a fonte de verdade**, não esta seção.
 
-**Sobre troca de senha:** ela não resolve esquecimento (exige a senha atual). Ela resolve *comprometimento percebido* e higiene. Em piloto fechado de semanas, é **Should have**, não Must have. Recomendo executá-la mesmo assim porque é barata e destrava a coluna `passwordChangedAt`, que é o mecanismo de revogação de que o piloto precisa se um token vazar.
+**Sobre troca de senha (recomendação original, agora apenas contexto histórico):** o roadmap argumentava que ela é *Should have* porque não resolve esquecimento (exige senha atual) — só resolve comprometimento percebido e higiene, e citava a coluna `passwordChangedAt` como mecanismo de revogação. Essa referência já estava desatualizada mesmo antes de D3: a revogação foi desenhada com `authVersion` (inteiro), não `passwordChangedAt` (ver a comparação completa na seção de P2-02). D3 torna o argumento de prioridade irrelevante: a tarefa é Must have agora, independentemente do trade-off *Should have* que motivou a recomendação original.
 
 ### 3.3 Telemetria — auditoria de M4-04 e o que falta para M5-02
 
@@ -467,7 +472,7 @@ Plataforma deixou de ser abstração. Os fatos abaixo foram verificados na docum
 
 ### P0-01 · Registrar as decisões humanas do piloto
 
-**Status: PARCIALMENTE CONCLUÍDA em 2026-08-15.** Oito decisões aprovadas; quatro permanecem abertas. Nenhuma tarefa está bloqueada pelas que restam, exceto onde indicado.
+**Status: CONCLUÍDA em 2026-08-28.** As sete decisões que restavam abertas (D1–D7) foram tomadas pelo responsável humano do projeto e registradas em `docs/pilot-decisions.md`, que passa a ser a fonte de verdade para todos os valores que este roadmap referenciava como "decisão humana" ou "P0-01". Duas delas (D4, D7) têm um componente que continua **deliberadamente adiado** — não porque a decisão de P0-01 ficou incompleta, mas porque o próprio responsável decidiu *quando* vai decidir o resto, com uma condição objetiva registrada (`DEFERRED_WITH_GATE`, ver `docs/pilot-decisions.md`). Nenhuma tarefa do piloto fica bloqueada por essas duas pendências — apenas a ativação comercial em Paid Tier (D4) e a comercialização fora do piloto (D7) permanecem condicionadas a evidência/parecer futuros, exatamente como o próprio roadmap já previa.
 
 **Problema.** Cinco tarefas deste roadmap têm sua implementação determinada por decisões que não são inferíveis do código. Executá-las antes das decisões produz retrabalho garantido.
 
@@ -494,23 +499,23 @@ Consequências aceitas conscientemente: cold start de Render e de Neon, ausênci
 
 **Política de dados enquanto o backend estiver no Free Tier** *(r4)*: o ambiente **não é aprovado** para piloto externo com DANFE real. Desenvolvimento interno segue normalmente — testes automatizados, mocks, fixtures e documentos sintéticos continuam permitidos, e **nada disso bloqueia P0-02 a P5**. O bloqueio incide exclusivamente sobre o momento em que um participante externo envia documento real, e é verificado em **P6-00**.
 
-#### Decisões que PERMANECEM ABERTAS
+#### Decisões resolvidas em 2026-08-28 — ver `docs/pilot-decisions.md`
 
-Estas continuam em §13. Nenhuma foi preenchida com valor inventado.
+As sete linhas que antes apareciam aqui como "permanecem abertas" foram decididas ou formalmente classificadas. Tabela mantida para rastreabilidade, com o resultado:
 
-| # | Decisão | Bloqueia |
-|---|---|---|
-| 1 | Máximo de itens por DANFE | **P4-01** |
-| 2 | Tamanho e composição da coorte | P6-01 |
-| 3 | Janela/duração do piloto | P6-02 |
-| 4 | Retenção de `ai_call_events`, em dias | P3-03 |
-| 5 | `PATCH /me/password` entra antes ou depois do piloto | P2-02 |
-| 6 | Prazo legal de guarda de `AuditLog` | — (pendência jurídica herdada) |
-| 7 | **Budget diário/mensal do Gemini quando o Paid Tier for ativado** *(r4)* | **P4-02 modo B**, P6-00 |
+| # | Decisão | Resultado | Bloqueava |
+|---|---|---|---|
+| 1 | Máximo de itens por DANFE | **APPROVED — D1: 100 itens** | **P4-01** (agora destravada) |
+| 2 | Tamanho e composição da coorte | **APPROVED — D5: teto de 200, não meta** (composição fica a critério operacional do convite, sem exigência de critério de aceite) | P6-01 (destravada) |
+| 3 | Janela/duração do piloto | **APPROVED — D6: 4 semanas** | P6-02 (destravada) |
+| 4 | Retenção de `ai_call_events`, em dias | **APPROVED — D2: 60 dias** | P3-03 (parte de retenção destravada) |
+| 5 | `PATCH /me/password` entra antes ou depois do piloto | **APPROVED — D3: entra antes**, com escopo ampliado para recuperação por e-mail (nova tarefa **P2-03**, bloqueada só pela escolha de provedor de e-mail) | P2-02 reclassificada para *Must have* |
+| 6 | Prazo legal de guarda de `AuditLog` | **DEFERRED_WITH_GATE — D7**: política do piloto decidida (sem purga); prazo definitivo é gate de compliance antes da comercialização, não bloqueador do piloto | — (não bloqueava nada no piloto; segue não bloqueando) |
+| 7 | **Budget diário/mensal do Gemini quando o Paid Tier for ativado** *(r4)* | **DEFERRED_WITH_GATE — D4**: Free Tier no piloto é o modo aprovado, sem budget USD arbitrário; valores do Paid Tier comercial ficam explicitamente adiados até haver evidência de custo real | **P4-02 modo B** (valores), P6-00 (framing atualizado) |
 
 *(A pendência de uso de DANFE real sob os termos do free tier foi **resolvida em r4** — ver §13-A.)*
 
-**Descrição do que resta.** Registrar as decisões acima em `docs/pilot-decisions.md`, no mesmo formato (decisão · alternativa descartada · responsável · data), e resolver as abertas.
+**Dois achados técnicos novos, registrados como tarefas** durante a investigação read-only de `AuditLog` que motivou a revisão de D7: **P3-00A** (cobertura de auditoria para confirmação/rejeição de sugestão) e **P3-00B** (barreira estrutural de payload do `AuditLog`) — ver as seções correspondentes mais abaixo. Nenhuma das duas foi implementada nesta rodada; ambas são registro de escopo.
 
 | | |
 |---|---|
@@ -518,11 +523,11 @@ Estas continuam em §13. Nenhuma foi preenchida com valor inventado.
 | **Esforço** | **S** |
 | **Risco** | **Nenhum** — não altera código |
 | **Prioridade** | **P0** |
-| **Impacto** | Remove adivinhação de 4 tarefas. Custa horas; evita dias. |
+| **Impacto** | Remove adivinhação de todas as tarefas que dependiam de decisão humana. |
 
-**Critérios de aceite.** `docs/pilot-decisions.md` existe e registra as decisões aprovadas **e** as abertas, cada uma com responsável e data; a política de tier por tipo de dado (§13-A) está registrada e referenciada pelo gate **P6-00**.
+**Critérios de aceite.** `docs/pilot-decisions.md` existe e registra as decisões aprovadas **e** as deferidas com gate, cada uma com responsável e data — ✅ satisfeito. A política de tier por tipo de dado (§13-A) está registrada e referenciada pelo gate **P6-00** — ✅ já satisfeito desde r4.
 **Testes esperados.** Nenhum (documento).
-**Fora de escopo.** Contratar/provisionar qualquer serviço — isso é P5. Reabrir decisão aprovada sem incompatibilidade técnica concreta documentada.
+**Fora de escopo.** Contratar/provisionar qualquer serviço — isso é P5. Reabrir decisão aprovada sem incompatibilidade técnica concreta documentada. Escolher provedor de e-mail (fica com quem decidir P2-03). Inventar valores de budget do Paid Tier (fica com quem decidir após evidência do piloto).
 
 ---
 
@@ -745,6 +750,8 @@ Validação completa: `prisma generate`/`validate` aprovados · `typecheck` limp
 
 ### P2-02 · `PATCH /me/password` com invalidação dos tokens anteriores
 
+**Reclassificada em 2026-08-28 — D3 (`docs/pilot-decisions.md`): passa de *Should have* para requisito ANTES do piloto.** O responsável humano aprovou o escopo de password management completo — troca autenticada (esta tarefa) **e** recuperação por e-mail (nova tarefa **P2-03**, abaixo, mantida separada para não distorcer os critérios de aceite já escritos aqui). Esta tarefa (P2-02) não muda de desenho — a decisão apenas eleva sua prioridade e remove a condicionalidade que o §3.2 registrava.
+
 **Problema.** Não há troca de senha autenticada. Um usuário que suspeita de comprometimento não tem nenhuma ação disponível, e um token vazado permanece válido por até 24 horas sem qualquer forma de revogação.
 
 **Objetivo.** Permitir que o usuário autenticado troque a própria senha, e que essa troca invalide os tokens emitidos antes dela.
@@ -783,8 +790,8 @@ A r1 propunha comparar `JWT.iat` com uma coluna `passwordChangedAt`. Comparando 
 | **Dependências** | nenhuma técnica; recomendável após P2-01 |
 | **Esforço** | **M** |
 | **Risco** | **Médio** — altera o caminho de autenticação, que toda rota autenticada atravessa. Exige teste de que token antigo é rejeitado e token novo aceito. |
-| **Prioridade** | **P2** — *Should have during pilot*, não bloqueia deploy (ver §3.2) |
-| **Impacto** | Dá ao usuário a única ação de segurança que ele pode tomar sozinho, e ao operador a primeira alavanca de revogação existente no sistema. |
+| **Prioridade** | **P0 — Must have antes do piloto** (D3, 2026-08-28; era *Should have*, ver §3.2 para o histórico da recomendação anterior) |
+| **Impacto** | Dá ao usuário a única ação de segurança que ele pode tomar sozinho, e ao operador a primeira alavanca de revogação existente no sistema. Também é a base de `authVersion` que P2-03 (recuperação por e-mail) reutiliza. |
 
 **Critérios de aceite.**
 1. Senha atual correta + nova válida → `204`, e o login subsequente só funciona com a nova senha.
@@ -800,7 +807,56 @@ A r1 propunha comparar `JWT.iat` com uma coluna `passwordChangedAt`. Comparando 
 
 **Testes esperados.** Unitário do use case (senha correta/incorreta/igual/hash novo persistido/`authVersion` incrementada atomicamente); unitário de `ensureAuthenticated` para versão igual, versão diferente, claim ausente e claim de tipo inválido; **teste determinístico de mesmo segundo** — assinar token e trocar senha sem avanço de relógio, provando rejeição (é o caso que a estratégia descartada não resolveria); teste de rota para 204/401/400/429 e para a rejeição do token antigo em `GET /companies`; gate PostgreSQL para a migration e para a atomicidade da escrita.
 
-**Fora de escopo.** Reset por e-mail. Refresh token. Session store. Logout explícito. Lista de sessões. Alteração da política de senha. Bloqueio de conta por tentativas. **Endpoint de revogação administrativa** — o mecanismo `authVersion` passa a suportá-la, mas a única superfície que a usa nesta fase é o script de operador de P5-05.
+**Fora de escopo.** Recuperação de senha por e-mail — **agora tarefa própria, P2-03** (não mais adiada indefinidamente; ver abaixo). Refresh token. Session store. Logout explícito. Lista de sessões. Alteração da política de senha. Bloqueio de conta por tentativas. **Endpoint de revogação administrativa** — o mecanismo `authVersion` passa a suportá-la, mas a única superfície que a usa nesta fase é o script de operador de P5-05.
+
+---
+
+### P2-03 · Recuperação de senha por e-mail (código temporário)
+
+**Status: criada em 2026-08-28 — D3 (`docs/pilot-decisions.md`). Não implementada. Bloqueada pela escolha de provedor de e-mail (decisão humana ainda não tomada — não escolhida nesta tarefa nem nesta sessão).**
+
+**Problema.** P2-02 cobre troca de senha para quem já está autenticado. Não cobre o caso de esquecimento — um usuário que perdeu a senha e não tem token válido não tem nenhum caminho de autosserviço. O responsável humano do piloto decidiu que isso precisa existir **antes** do piloto, não depois, revertendo a recomendação anterior deste roadmap (§3.2) de tratar isso como runbook de operador.
+
+**Objetivo.** Usuário que esqueceu a senha recebe um código temporário por e-mail, valida o código, e define uma nova senha — sem revelar a nenhum solicitante se um e-mail específico tem conta cadastrada.
+
+**Descrição.** Dois novos endpoints públicos, ambos com rate limit próprio e resposta genérica independente de o e-mail existir ou não:
+
+1. **Solicitar recuperação** (`POST /password-recovery` ou rota equivalente, nome final a definir na implementação): recebe `email`; se existir conta, gera um código temporário aleatório, grava **apenas o hash** do código (nunca o valor em texto puro) com expiração curta e contador de tentativas zerado, e envia o código por e-mail através do provedor a ser escolhido; responde sempre com sucesso genérico, exista ou não a conta — **timing e conteúdo da resposta não podem distinguir os dois casos**.
+2. **Confirmar recuperação** (`POST /password-recovery/confirm` ou equivalente): recebe `email`, `code`, `newPassword`; valida o código contra o hash armazenado (comparação seguindo o mesmo padrão de tempo constante já usado para o código de convite em P4-03); código incorreto incrementa um contador de tentativas e recusa acima de um limite; código correto e dentro da validade grava o novo hash de senha e **incrementa `authVersion` na mesma escrita** (mesmo mecanismo de P2-02) — reaproveitando a invalidação de tokens anteriores já construída ali, não reinventando uma segunda forma de revogação.
+
+**Requisitos aprovados (D3), não inventados nesta tarefa:**
+- código não revela existência de conta (mensagem e status idênticos nos dois casos);
+- expiração curta (valor exato a definir na implementação — não fixado por esta decisão);
+- uso único — código consumido no primeiro uso bem-sucedido, ou invalidado após expirar;
+- limite de tentativas de validação por código;
+- rate limiting dedicado, no padrão de `uploadRateLimiter`/`loginRateLimiter`;
+- **somente hash do código é armazenado**, nunca o valor em texto puro — mesma disciplina de `Argon2HashProvider` já usada para senha;
+- confirmação bem-sucedida invalida credenciais anteriores via `authVersion` — não um mecanismo paralelo.
+
+**Dependência explícita e não resolvida: provedor de e-mail.** Esta tarefa não pode ser implementada até o responsável humano escolher um provedor (Resend, SendGrid, SES ou outro) — escolha que não foi feita nesta decisão e que o agente não deve fazer sozinho. Até lá, a tarefa permanece bloqueada, não estimada em esforço de calendário.
+
+| | |
+|---|---|
+| **Dependências** | P2-02 (reutiliza `authVersion`); **escolha de provedor de e-mail — decisão humana em aberto, não coberta por D1–D7** |
+| **Esforço** | **M**, a confirmar após a escolha do provedor (integração de terceiro pode adicionar complexidade não estimada aqui) |
+| **Risco** | **Médio-alto** — subsistema novo com superfície de ataque própria (enumeração de e-mail, força bruta de código, abuso de envio). Mitigado pelos requisitos já aprovados em D3. |
+| **Prioridade** | **P0 — Must have antes do piloto** (D3), mas **bloqueada** até a escolha de provedor |
+| **Impacto** | Fecha o caminho de recuperação de conta que hoje só existe como script de operador (P5-05) — decisão humana de trazer isso para autosserviço antes do piloto. |
+
+**Critérios de aceite (preliminares — a confirmar na implementação, após escolha de provedor).**
+1. Solicitação de recuperação para e-mail existente e para e-mail inexistente devolvem resposta idêntica em status e corpo.
+2. Código correto, dentro da validade e do limite de tentativas → nova senha aceita, `204`/`200`, e login subsequente só funciona com a nova senha.
+3. Código incorreto → recusado, contador de tentativas incrementado; acima do limite, recusado independentemente do valor do código.
+4. Código expirado → recusado mesmo se correto.
+5. Código usado uma vez não pode ser reutilizado.
+6. Apenas hash do código persiste no banco — nunca o valor em texto puro, verificado por teste e por revisão de schema.
+7. Confirmação bem-sucedida incrementa `authVersion` — tokens emitidos antes deixam de ser aceitos, mesmo teste de "mesmo segundo" que P2-02 já define.
+8. Rate limiting dedicado nas duas rotas, devolvendo `429` via `AppError`.
+9. Nenhum e-mail, código ou hash aparece em log — mesma disciplina de `redact`/`SENSITIVE_KEYS` já usada para senha/token/segredo de convite.
+
+**Testes esperados.** Unitário do fluxo completo (solicitar → confirmar, com dublê do provedor de e-mail); unitário de expiração, limite de tentativas e uso único; unitário de não-enumeração (resposta idêntica); teste de rota para as duas novas rotas; gate PostgreSQL para a migration de armazenamento do código (hash + expiração + tentativas) e para a atomicidade hash-de-senha + `authVersion`.
+
+**Fora de escopo.** Escolha do provedor de e-mail (decisão humana, fora desta tarefa e fora de D1–D7). Template visual do e-mail. Internacionalização do e-mail. Qualquer outro canal de recuperação (SMS, pergunta de segurança). Login social.
 
 ---
 
@@ -840,6 +896,58 @@ A relação correta são **duas responsabilidades separadas no mesmo banco** (§
 Nenhuma das duas deriva da outra em tempo de execução. A consistência entre elas é verificada **depois**, por reconciliação periódica (**P3-04**), e a divergência é sinal a investigar — não um erro a corrigir automaticamente.
 
 Riscos de A e como tratá-los: a escrita de eventos entra no caminho quente da requisição (um `INSERT`, custo desprezível) e **jamais pode participar da transação da nota** — uma falha de telemetria não pode reverter uma nota já persistida, exatamente como já vale para `AuditLog`. Crescimento de tabela é tratado por retenção em P3-03. C permanece o sucessor natural quando houver múltiplas instâncias e necessidade de tracing distribuído — não agora, e, mesmo então, **o ledger continuaria no Postgres**: tracing distribuído é observabilidade, não autorização.
+
+---
+
+### P3-00A · Auditar decisões humanas de `ProductSimilaritySuggestion`
+
+**Status: criada em 2026-08-28, a partir da investigação read-only de `AuditLog` desta sessão. Não implementada.**
+
+**Problema.** `ConfirmProductSuggestionUseCase` e `RejectProductSuggestionUseCase` alteram estado real de produto — `confirm` faz upsert ponderado de quantidade/custo no produto sugerido (`prisma-product-suggestion.repository.ts`, `upsertWeightedProductEntry`); `reject` cria/atualiza um produto diferente do sugerido — mas **nenhum dos dois cria uma linha em `AuditLog`**. A única persistência da decisão é `ProductSimilaritySuggestion.status/decidedAt/decidedByUserId` (tabela própria, correta para o que é) mais uma linha efêmera de telemetria (`ai_suggestion`, stdout, sem retenção). É a única categoria de escrita de domínio real hoje coberta por `persistAuditBestEffort` em nenhum lugar — `CreateCompanyUseCase` e `ReadInvoiceUseCase` auditam; estes dois não.
+
+Isso é relevante especificamente porque confirmar/rejeitar uma sugestão de IA é, segundo a filosofia do `CLAUDE.md`, a decisão humana central do domínio de matching ("nunca aplicar sugestão automaticamente... exigir confirmação humana"). A confirmação existe e é obrigatória; o que falta é o rastro de auditoria dessa confirmação, no mesmo padrão já usado para as demais escritas de produto.
+
+**Objetivo (futuro — não desta rodada).** Garantir que confirmar/rejeitar sugestão deixe trilha de auditoria no mesmo padrão de `ReadInvoiceUseCase` (ação `UPDATE`/`CREATE`, entidade `PRODUCT`, `previousState`/`newState` limitado a `{ quantity, unitPrice, totalPrice }`, sem descrição/código do produto — mesmo payload disciplinado já em uso, sem inventar campo novo).
+
+**Escopo esperado.** Dois use cases (`confirm`/`reject`) ganham uma chamada a `persistAuditBestEffort` cada, análoga à já existente em `read-invoice.use-case.ts:276`, após a escrita transacional do produto. Nenhuma mudança de schema — `AuditLog` já tem todos os campos necessários.
+
+| | |
+|---|---|
+| **Dependências** | nenhuma técnica — reaproveita `persistAuditBestEffort` e `IAuditLogRepository` já existentes |
+| **Esforço** | **S** |
+| **Risco** | **Baixo** — best-effort, mesmo padrão já validado em produção pelos outros dois use cases |
+| **Prioridade** | **Should have** — não é bloqueador de piloto. O dado da decisão **não se perde** hoje (`ProductSimilaritySuggestion` já registra quem decidiu e quando); o gap é de **consolidação** num único lugar de auditoria, não de perda de informação. Recomendado antes da comercialização, não antes do piloto — reavaliar a classificação se o piloto (P6-02) revelar necessidade real de correlacionar decisões de sugestão com o restante da trilha de `AuditLog`. |
+| **Impacto** | Fecha a única lacuna de cobertura identificada na investigação de `AuditLog` — hoje a trilha de auditoria de produto tem uma exceção silenciosa. |
+
+**DoD mínimo.** Teste unitário provando que `confirm` e `reject` chamam `persistAuditBestEffort` com `action`/`entity`/`previousState`/`newState` corretos; teste provando que falha na escrita do audit log não reverte a confirmação/rejeição (mesmo contrato best-effort dos demais); nenhuma migration necessária.
+**Testes esperados.** Unitário nos dois use cases (dublê de `IAuditLogRepository`, sucesso e falha da escrita).
+**Fora de escopo.** Auditar leitura de sugestões (`list-pending-product-suggestions`). Qualquer mudança em `ProductSimilaritySuggestion`. Payload adicional além do já usado por `PRODUCT` em `read-invoice.use-case.ts` — não inventar campo novo (ex.: não incluir `receivedDescription`/`reason` da sugestão em `AuditLog`, que já não são o padrão hoje).
+
+---
+
+### P3-00B · Barreira estrutural de payload do `AuditLog`
+
+**Status: criada em 2026-08-28, a partir da investigação read-only de `AuditLog` desta sessão. Não implementada.**
+
+**Problema.** `AuditLog.details` (`String?`), `previousState`/`newState` (`Json?`) não têm nenhuma validação de schema no banco nem redaction no caminho de persistência — `redact()`/`SENSITIVE_KEYS` (`src/infra/logger.ts`) protege o **log estruturado** (stdout), nunca `PrismaAuditLogRepository.create()`. Hoje não há vazamento: os dois únicos use cases que escrevem em `AuditLog` (`CreateCompanyUseCase`, `ReadInvoiceUseCase`) passam apenas IDs, contadores e três números (`quantity`/`unitPrice`/`totalPrice`) — disciplina de quem escreve, não barreira do sistema. Um use case futuro (por exemplo, **P2-02/P2-03**, que tocam credenciais) poderia persistir acidentalmente `password`, `token`, hash, ou o conteúdo de um documento em `previousState`/`newState`, e nada no schema ou no repositório impediria isso.
+
+**Objetivo (futuro — não desta rodada).** Um contrato/guard estrutural que limite o que pode ser persistido em `AuditLog`, rejeitando ou redigindo antes da escrita: `password`, `passwordHash`, `token`, `jwt`, `apiKey`, `secret` (mesmas chaves normalizadas já usadas em `SENSITIVE_KEYS`, para não duplicar a lista), conteúdo integral de documento, e qualquer payload fora do formato flat já usado (`Record<string, string|number|boolean|null>`, sem aninhamento).
+
+**Abordagem esperada, em nível de design (não implementação).** Duas alternativas plausíveis, a avaliar na tarefa: (a) reaproveitar `redact()`/`SENSITIVE_KEYS` de `src/infra/logger.ts` chamando-o também dentro de `PrismaAuditLogRepository.create()`/`persistAuditBestEffort`, evitando duplicar a lista de chaves sensíveis; ou (b) um `assertAuditStatePayload` dedicado que valida em tempo de execução que `previousState`/`newState` são flat e não contêm chaves sensíveis, lançando antes da escrita (fail-closed, coerente com a prioridade "Segurança" do `CLAUDE.md`) em vez de mascarar silenciosamente. A tarefa deve decidir entre as duas — mascarar (comportamento atual do logger) ou recusar (mais estrito, mais correto para uma trilha de auditoria que não deveria conter o dado sensível nem mascarado) — e registrar a escolha com justificativa, não herdar a decisão do logger por omissão.
+
+**Por que isto ganha urgência agora, não é só higiene abstrata:** D3 (`docs/pilot-decisions.md`) já aprovou P2-02/P2-03 como requisito pré-piloto, e ambos tocam exatamente a superfície de risco que esta tarefa endereça (P2-02 já audita `{ authVersion }`; P2-03 vai precisar de disciplina equivalente para código de recuperação). Recomenda-se executar esta tarefa **antes ou junto com P2-02**, não depois — não como bloqueador formal, mas porque a janela de risco (novo call site de `AuditLog` tocando credenciais) abre exatamente com essas duas tarefas.
+
+| | |
+|---|---|
+| **Dependências** | nenhuma técnica |
+| **Esforço** | **S** |
+| **Risco** | **Baixo** — é uma restrição adicional sobre um caminho já existente, sem mudar o formato dos dois use cases atuais |
+| **Prioridade** | **Should have, recomendado antes ou junto de P2-02** (ver justificativa acima) — não é bloqueador formal de piloto, mas reduz risco real de uma tarefa que já é pré-piloto |
+| **Impacto** | Fecha a segunda lacuna identificada na investigação de `AuditLog`: ausência de barreira estrutural, hoje mascarada pela disciplina dos dois call sites existentes. |
+
+**DoD mínimo.** Decisão registrada entre mascarar vs. recusar; teste unitário provando que uma chave sensível (`password`, `token`, etc.) em `previousState`/`newState`/`details` é redigida ou rejeitada, conforme a escolha; teste provando que os dois use cases existentes (`CreateCompanyUseCase`, `ReadInvoiceUseCase`) continuam passando sem alteração de comportamento.
+**Testes esperados.** Unitário do guard/redação isolado; teste de regressão dos dois use cases existentes contra o novo caminho.
+**Fora de escopo.** Redesenhar `AuditState`. Adicionar coluna nova ao schema. Aplicar a mesma barreira a `ai_call_events` (P3-01 já define, por design, que nenhum conteúdo de documento entra ali — não precisa do mesmo guard).
 
 ---
 
@@ -917,11 +1025,13 @@ Riscos de A e como tratá-los: a escrita de eventos entra no caminho quente da r
 
 ### P3-03 · Consultas de referência, retenção e runbook de telemetria
 
+**Retenção destravada em 2026-08-28 — D2 (`docs/pilot-decisions.md`): 60 dias para `ai_call_events`.** Aplica-se somente a essa tabela — explicitamente não ao `AuditLog` (D7: sem purga durante o piloto) nem ao `ai_usage_ledger` (nunca apagado, já era critério de aceite).
+
 **Problema.** Dado persistido sem consulta escrita é dado que ninguém usa sob pressão. E tabela de evento sem retenção cresce sem limite.
 
 **Objetivo.** As oito perguntas do piloto têm, cada uma, uma consulta SQL versionada e testada; a retenção está definida e implementada.
 
-**Descrição.** `docs/telemetry-runbook.md` com uma consulta nomeada por pergunta: (1) latência avg/p50/p95 por `operation`; (2) tokens por nota; (3) custo por nota; (4) custo por dia e acumulado do mês; (5) taxa de falha por `failureCategory`; (6) distribuição de confidence; (7) taxa de aceitação/rejeição por faixa; (8) chamadas `product_similarity` por nota (distribuição, não só média). Cada consulta acompanhada da pergunta operacional que ela responde e da leitura esperada. Retenção conforme decidido em P0-01, implementada como `DELETE` por idade em script de operador — **não** um job automático nesta fase, e **sem** tocar em `AuditLog`, cuja política conservadora de M5-01 permanece intacta.
+**Descrição.** `docs/telemetry-runbook.md` com uma consulta nomeada por pergunta: (1) latência avg/p50/p95 por `operation`; (2) tokens por nota; (3) custo por nota; (4) custo por dia e acumulado do mês; (5) taxa de falha por `failureCategory`; (6) distribuição de confidence; (7) taxa de aceitação/rejeição por faixa; (8) chamadas `product_similarity` por nota (distribuição, não só média). Cada consulta acompanhada da pergunta operacional que ela responde e da leitura esperada. Retenção: **60 dias** (D2), implementada como `DELETE` por idade em script de operador — **não** um job automático nesta fase, e **sem** tocar em `AuditLog`, cuja política conservadora (mantida também durante o piloto por D7) permanece intacta.
 
 | | |
 |---|---|
@@ -1004,17 +1114,19 @@ Tolerância inicial sugerida: **5%** entre ledger e eventos num período com vol
 
 ### P4-01 · Limitar o número de itens por DANFE
 
+**Status: DESTRAVADA em 2026-08-28 — não implementada.** `N = 100`, decisão **D1** (`docs/pilot-decisions.md`), aprovada pelo responsável humano do piloto: limite operacional do piloto (não regra fiscal), sujeito a revisão com evidência real de distribuição de itens por DANFE observada na janela (P6-02/P6-03).
+
 **Problema.** `danfeResponseSchema.products` é `z.array(...).min(1)` **sem `.max()`**. O número de chamadas `product_similarity` de um upload é `N` = itens não-casados, e `N` é controlado pelo **conteúdo do documento**, não pelo sistema. Uma única requisição, dentro do rate limit, pode disparar um número arbitrário de chamadas ao Gemini. Qualquer teto de orçamento fica com uma cauda ilimitada dentro de uma requisição enquanto isso valer.
 
 **Objetivo.** Uma requisição de upload tem um custo máximo conhecido e finito.
 
-**Descrição.** Adicionar `.max(N)` ao array de produtos em `danfeResponseSchema` e o mesmo limite no `responseSchema` enviado ao Gemini (`maxItems`), para que o modelo não gaste tokens gerando o que será rejeitado. Nota que excede o limite falha com `AppError` de 422 e mensagem clara, **antes** de qualquer chamada de similaridade — a validação já acontece no ponto certo do fluxo (`extractDanfeData` → parse → `read-invoice` valida). O valor de `N` deve ser derivado de DANFEs reais do domínio, não escolhido no ar: verificar com o responsável de produto quantos itens tem a maior nota que os participantes do piloto realmente emitem/recebem, e adotar esse valor com folga. Tornar configurável por env, com o mesmo padrão validado das demais.
+**Descrição.** Adicionar `.max(100)` ao array de produtos em `danfeResponseSchema` e o mesmo limite no `responseSchema` enviado ao Gemini (`maxItems`), para que o modelo não gaste tokens gerando o que será rejeitado. Nota que excede o limite falha com `AppError` de 422 e mensagem clara, **antes** de qualquer chamada de similaridade — a validação já acontece no ponto certo do fluxo (`extractDanfeData` → parse → `read-invoice` valida). `N = 100` é a decisão **D1**, não um valor escolhido nesta tarefa. Tornar configurável por env (default 100), com o mesmo padrão validado das demais — mantém a porta aberta para a revisão prevista em D1 sem exigir novo deploy de código.
 
 | | |
 |---|---|
-| **Dependências** | P0-01 (valor de `N`) |
+| **Dependências** | ~~P0-01 (valor de `N`)~~ — **satisfeita**: `N = 100` (D1) |
 | **Esforço** | **S** |
-| **Risco** | **Médio** — um limite baixo demais rejeita nota legítima, que é falha de correção, prioridade 1 do CLAUDE.md. Por isso o valor vem de dado do domínio e não de suposição. |
+| **Risco** | **Médio** — um limite baixo demais rejeita nota legítima, que é falha de correção, prioridade 1 do CLAUDE.md. Por isso o valor vem de decisão humana registrada (D1), não de suposição. |
 | **Prioridade** | **P0** |
 | **Impacto** | Torna o custo por requisição limitado. É pré-condição para que o teto de P4-02 signifique alguma coisa. |
 
@@ -1027,6 +1139,8 @@ Tolerância inicial sugerida: **5%** entre ledger e eventos num período com vol
 ### P4-02 · Guard de orçamento Gemini com reserva atômica e fail-closed
 
 *(Título revisto em r3: era "Guard de orçamento Gemini". A unidade mudou de USD para cota; o desenho, não.)*
+
+**Confirmado em 2026-08-28 — D4 (`docs/pilot-decisions.md`): o piloto opera em Modo A** (tetos de requisições/tokens, sem dimensão de custo), exatamente como já desenhado abaixo — nenhuma mudança de design decorre desta decisão. **Modo B (Paid Tier comercial) permanece bloqueado** até quatro condições explícitas (budget guard, teto diário, teto mensal, evidência de custo real do piloto) — ver D4 para o texto completo do gate. Os valores de teto do Modo B continuam **deliberadamente não inventados**.
 
 **Problema.** Não existe nenhum teto de consumo. Não existe forma de desligar a IA sem derrubar o serviço (`GEMINI_API_KEY` é obrigatória no boot). Sob Free Tier, o dano deixa de ser financeiro e passa a ser de **disponibilidade**: um participante que esgote a cota diária do projeto deixa toda a coorte sem sistema, e não há como distinguir isso de uma queda.
 
@@ -1141,7 +1255,7 @@ A r2 sobrecarregava `GEMINI_DAILY_BUDGET_USD=0` com dois significados. **Isso n�
 
 | | |
 |---|---|
-| **Dependências** | **Gate operacional** (limites reais lidos no AI Studio para o modo A), P4-01 (cauda por requisição limitada). **Não depende de P3-01** — revisto em r2: o ledger é registro próprio, com escrita forte. Os **valores** de teto do modo B são a decisão aberta nº 7 de §13 e não bloqueiam a implementação |
+| **Dependências** | **Gate operacional** (limites reais lidos no AI Studio para o modo A), P4-01 (cauda por requisição limitada). **Não depende de P3-01** — revisto em r2: o ledger é registro próprio, com escrita forte. Os **valores** de teto do modo B permanecem **DEFERRED_WITH_GATE (D4)** e não bloqueiam a implementação |
 | **Esforço** | **M** |
 | **Risco** | **Médio** — um bug aqui pode negar serviço legítimo. Mitigado por teto configurável, por logar toda recusa com o motivo, e por não afetar nenhuma operação não-IA. |
 | **Prioridade** | **P0** |
@@ -1165,7 +1279,7 @@ A r2 sobrecarregava `GEMINI_DAILY_BUDGET_USD=0` com dois significados. **Isso n�
 
 **Testes esperados.** Unitário do contabilizador (reserva de requisições e tokens, reconciliação, liberação em erro, virada de dia); unitário dos casos de fail-closed, incluindo **ledger indisponível ⇒ provider nunca invocado**; unitário provando que `429` de cota não é repetido e que cada tentativa debita; teste de rota para 503/429 e para a preservação das rotas não-IA; **teste de concorrência real no gate PostgreSQL** com duas reservas simultâneas no limite; teste dos estados A/B/C distinguíveis.
 
-**Fora de escopo.** Teto por empresa. **Habilitar billing no projeto Google — é ação operacional do gate P6-00, não desta tarefa, e permanece proibida enquanto o ambiente for de desenvolvimento.** Configuração do console Google (gate + runbook de P5-05, não código). Circuit breaker por taxa de falha. Fila/backpressure de uploads. Cobrança de usuário. **Reconciliação — é P3-04.** Definir os **valores** de orçamento do modo B (decisão humana nº 7).
+**Fora de escopo.** Teto por empresa. **Habilitar billing no projeto Google — é ação operacional do gate P6-00, não desta tarefa, e permanece proibida enquanto o ambiente for de desenvolvimento.** Configuração do console Google (gate + runbook de P5-05, não código). Circuit breaker por taxa de falha. Fila/backpressure de uploads. Cobrança de usuário. **Reconciliação — é P3-04.** Definir os **valores** de orçamento do modo B — **DEFERRED_WITH_GATE (D4)**, aguardando evidência real do piloto.
 
 ---
 
@@ -1459,6 +1573,8 @@ Se P2-02 **não** entrar no piloto, o script ainda funciona (redefine a senha), 
 
 ### P6-00 · REAL-DOCUMENT AI TIER GATE *(r4)*
 
+**Gate reafirmado por D4 (2026-08-28, `docs/pilot-decisions.md`): Free Tier pilot = permitido. Paid commercial = bloqueado** até budget guard, teto diário e teto mensal explícitos existirem, calibrados com evidência real do piloto. Este gate (P6-00) é onde essa distinção é verificada operacionalmente antes de qualquer ativação comercial — nada muda no desenho abaixo, D4 apenas confirma e nomeia formalmente os dois lados da fronteira.
+
 **Problema.** A resolução de §13-A separa os usos por tier: Free Tier para desenvolvimento com dado sintético, Paid Tier para DANFE real de terceiros. Uma separação que depende de alguém lembrar não é uma separação — e o modo de falha é silencioso: tudo funciona igual, e a diferença só aparece nos termos de uso do provedor.
 
 **Objetivo.** Nenhum participante externo envia DANFE real antes de haver **evidência registrada** de que o ambiente implantado está no tier aprovado para esse uso.
@@ -1472,7 +1588,7 @@ Nove verificações, todas com evidência:
 3. Confirmação de que esse projeto **não está mais operando sob a configuração Free** usada no desenvolvimento.
 4. **Billing/tier adequado** confirmado no console do provedor.
 5. **Política de dados do tier revisada** e registrada — é a razão de o gate existir.
-6. **Budget financeiro configurado** (P4-02 modo B), com os valores da decisão humana nº 7.
+6. **Budget financeiro configurado** (P4-02 modo B), com os valores de D4 — permanece DEFERRED_WITH_GATE até haver evidência real de custo do piloto.
 7. **Kill switch verificado** no ambiente real: `GEMINI_ENABLED=false` interrompe chamadas e o resto da API segue.
 8. **Teste controlado** executado com uma DANFE real, pelo operador, antes de qualquer terceiro.
 9. **Evidência registrada** em `docs/pilot-decisions.md` ou arquivo próprio, com data e responsável.
@@ -1481,7 +1597,7 @@ Nove verificações, todas com evidência:
 
 | | |
 |---|---|
-| **Dependências** | P4-02 (modo B configurável), P5 completo, decisão humana nº 7 (valores de budget) |
+| **Dependências** | P4-02 (modo B configurável), P5 completo, valores de budget de D4 (**DEFERRED_WITH_GATE** — não bloqueia este gate em si, bloqueia a ativação comercial) |
 | **Esforço** | **S** — é verificação, não construção |
 | **Risco** | **Nenhum** para o sistema; é o controle que impede um risco |
 | **Prioridade** | **P0** — **bloqueia P6-01** |
@@ -1489,7 +1605,7 @@ Nove verificações, todas com evidência:
 
 **Critérios de aceite.** As nove verificações executadas, cada uma com evidência registrada, data e responsável; o gate é **bloqueante** e está declarado como tal; nenhum acesso externo liberado antes da conclusão.
 **Testes esperados.** Nenhum automatizado — é gate operacional. O item 7 reusa o teste de kill switch de P4-02, executado agora contra o ambiente real.
-**Fora de escopo.** Implementar qualquer código. Definir os valores de budget (decisão humana nº 7). Automatizar a verificação de tier — não há API documentada e a frequência é uma vez.
+**Fora de escopo.** Implementar qualquer código. Definir os valores de budget — **DEFERRED_WITH_GATE (D4)**. Automatizar a verificação de tier — não há API documentada e a frequência é uma vez.
 
 **Não bloqueia P0-02 até P5.** Todo o trabalho técnico prossegue no Free Tier com dado sintético.
 
@@ -1497,11 +1613,13 @@ Nove verificações, todas com evidência:
 
 ### P6-01 · Provisionar coorte e ambiente e validar o ciclo real fim a fim
 
+**Coorte confirmada em 2026-08-28 — D5 (`docs/pilot-decisions.md`): teto de 200 usuários cadastrados, não meta.** O piloto não precisa atingir 200 para ser válido; a suficiência é avaliada por evidência de uso real (usuários ativos, DANFEs processadas, decisões de matching, erros, consumo de cota — não só contagem de cadastro), não por número bruto atingido.
+
 **Problema.** "Sistema implantado" e "sistema utilizável por pessoas reais" não são a mesma coisa. A verificação do upload real não pode acontecer no smoke test de cada deploy — custa orçamento de IA.
 
 **Objetivo.** Ambiente pronto, contas criadas e **o ciclo completo executado uma vez com uma DANFE real** antes de a coorte entrar.
 
-**Descrição.** Provisionar contas conforme a política de P4-03; configurar tetos de orçamento com os valores de P0-01; executar manualmente, uma vez, o ciclo integral: login → `GET /companies` → `GET /companies/:id/stocks` → upload de **uma DANFE real** → conferir produtos → conferir sugestões → confirmar uma → rejeitar uma → verificar que os eventos de telemetria correspondentes existem no banco e que o custo foi contabilizado no orçamento. Enviar instruções de acesso à coorte e abrir um canal de registro de incidentes.
+**Descrição.** Provisionar contas conforme a política de P4-03, **até o teto de 200 (D5)**; configurar tetos de orçamento conforme D4 (Modo A, Free Tier); executar manualmente, uma vez, o ciclo integral: login → `GET /companies` → `GET /companies/:id/stocks` → upload de **uma DANFE real** → conferir produtos → conferir sugestões → confirmar uma → rejeitar uma → verificar que os eventos de telemetria correspondentes existem no banco e que o custo foi contabilizado no orçamento. Enviar instruções de acesso à coorte e abrir um canal de registro de incidentes.
 
 | | |
 |---|---|
@@ -1519,11 +1637,13 @@ Nove verificações, todas com evidência:
 
 ### P6-02 · Operar e observar a janela do piloto
 
+**Janela confirmada em 2026-08-28 — D6 (`docs/pilot-decisions.md`): 4 semanas**, substituindo a faixa aberta de 2–4 semanas por um valor concreto. A regra de encerramento antecipado abaixo ("critérios objetivos de §12" ou "coorte não gera volume") continua valendo dentro dessas 4 semanas — D6 fixa o planejamento, não remove o critério de suficiência já registrado.
+
 **Problema.** Sem uma janela definida e sem observação sistemática, o piloto vira uso casual e não produz nem os dados de M5-02/M6-02 nem confiança operacional.
 
 **Objetivo.** Uma janela definida de uso real, com o comportamento observado, os incidentes registrados e o sistema exercitado nas condições que importam.
 
-**Descrição.** Durante a janela decidida em P0-01: revisar diariamente as consultas de P3-03 (custo do dia, taxa de falha, latência p95, chamadas de similaridade por nota) **e rodar a reconciliação de P3-04**; registrar todo incidente com `correlationId`/`requestId`, sintoma, causa e resolução; **exercitar deliberadamente três cenários operacionais** — reiniciar a aplicação sob uso e confirmar que `/health` volta e nada se perde; repetir o ensaio de restore **agora com dado real** (P5-03 com dado vazio prova pouco); simular esgotamento de orçamento baixando o teto temporariamente e confirmar que upload degrada com o status correto enquanto login, discovery e confirm/reject seguem funcionando.
+**Descrição.** Durante a janela de 4 semanas (D6): revisar diariamente as consultas de P3-03 (custo do dia, taxa de falha, latência p95, chamadas de similaridade por nota) **e rodar a reconciliação de P3-04**; registrar todo incidente com `correlationId`/`requestId`, sintoma, causa e resolução; **exercitar deliberadamente três cenários operacionais** — reiniciar a aplicação sob uso e confirmar que `/health` volta e nada se perde; repetir o ensaio de restore **agora com dado real** (P5-03 com dado vazio prova pouco); simular esgotamento de orçamento baixando o teto temporariamente e confirmar que upload degrada com o status correto enquanto login, discovery e confirm/reject seguem funcionando.
 
 **Medição específica de P0-02.** A janela também produz o número que a r1 queria e não podia ter: **quantas notas foram abortadas por `unavailable`, e por qual `failureCategory`**. É esse número — e não a intuição — que decide em P6-03 se o estado `UNRESOLVED` (§10) passa a ter justificativa ou permanece adiado.
 
@@ -1532,7 +1652,7 @@ Nove verificações, todas com evidência:
 | | |
 |---|---|
 | **Dependências** | P6-01 |
-| **Esforço** | **L** (calendário: 2–4 semanas; carga diária baixa) |
+| **Esforço** | **L** (calendário: **4 semanas**, D6; carga diária baixa) |
 | **Risco** | **Médio** — é o primeiro contato com dado real; espere achados |
 | **Prioridade** | **P0** |
 | **Impacto** | É o objetivo inteiro deste roadmap. |
@@ -1571,26 +1691,29 @@ Nove verificações, todas com evidência:
 
 | Tarefa | Depende de | Natureza |
 |---|---|---|
-| P0-01 | — | — |
+| P0-01 | — | — (✅ concluída 2026-08-28) |
 | **P0-02** | **—** | **independente** |
 | P1-01 | — | independente |
 | P1-02 | — | independente |
 | P2-01 | — | independente |
-| P2-02 | P2-01 (recomendado) | ordem preferencial |
-| P3-01 | P0-01 (retenção); **P0-02 recomendada antes** | **dura** / preferencial |
+| P2-02 | P2-01 (recomendado) | ordem preferencial. **P0, Must have (D3)** |
+| P2-03 *(nova)* | P2-02 (`authVersion`); **escolha de provedor de e-mail — decisão humana em aberto** | **dura**, e a segunda é bloqueadora até resolvida |
+| P3-00A *(nova)* | — | independente, *Should have* |
+| P3-00B *(nova)* | — | independente, *Should have*, recomendada antes/junto de P2-02 |
+| P3-01 | ~~P0-01 (retenção)~~ ✅ satisfeita (D2: 60 dias); **P0-02 recomendada antes** | preferencial |
 | P3-02 | P3-01 (`correlationId`) | **dura** |
 | P3-03 | P3-01, P3-02 | **dura** |
 | **P3-04** | **P3-01 e P4-02** | **dura** |
-| P4-01 | P0-01 (valor de `N`) | **dura** |
-| P4-02 | P0-01, P4-01 — **não depende mais de P3-01** *(r2)* | **dura** |
-| P4-03 | P0-01 (política) | **dura** |
-| P5-01 | **P0-01** (plataforma) | **dura** |
+| P4-01 | ~~P0-01 (valor de `N`)~~ ✅ satisfeita (D1: 100) | **dura** — destravada |
+| P4-02 | ~~P0-01~~ ✅, P4-01 — **não depende mais de P3-01** *(r2)*. Valores do modo B seguem `DEFERRED_WITH_GATE` (D4) | **dura** |
+| P4-03 | ~~P0-01 (política)~~ ✅ satisfeita | **dura** |
+| P5-01 | ~~P0-01~~ ✅ (plataforma) | **dura** |
 | P5-02 | P5-01, P2-01 | **dura** |
 | P5-03 | P5-01 | **dura** |
 | P5-04 | P5-01, **P1-01, P1-02** | **dura** |
-| P5-05 | P1, P3-03, **P3-04**, P4-02, P5-03, P5-04, **P0-02**, P2-02 (se existir) | **dura** |
+| P5-05 | P1, P3-03, **P3-04**, P4-02, P5-03, P5-04, **P0-02**, P2-02 | **dura** |
 | P5-06 | — | independente |
-| P6-01 | todas as P0 acima, **inclusive P0-02** | **dura** |
+| P6-01 | todas as P0 acima, **inclusive P0-02, P2-02 e P2-03** | **dura** |
 | P6-02 | P6-01, **P3-04** | **dura** |
 | P6-03 | P6-02 | **dura** |
 
@@ -1633,10 +1756,14 @@ P1-01 (GET /companies) ──┬────────────────
 P1-02 (GET /stocks) ─────┘                                                          │
                                                                                     │
 P2-01 (entropia JWT) ──► (P5-02)                                                    │
-        └─────────────► P2-02 (change password + authVersion) ──────────────────────┘  (opcional)
+        └─────────────► P2-02 (change password + authVersion) ──────────────────────┘  ← Must have (D3)
+                              └───────────────► P2-03 (recuperação por e-mail) ─────────  ← Must have (D3), BLOQUEADA por provedor de e-mail
 
 P5-06 (guarda de artefato) ── independente, a qualquer momento
+P3-00A, P3-00B ── independentes, Should have, fora do caminho crítico — ver §14
 ```
+
+**Nota de 2026-08-28:** este diagrama é anterior a D3 e mantido como referência visual do formato de dependências; P2-02 deixou de ser opcional e P2-03 é tarefa nova. **§14 é a fonte de verdade para a ordem atual**, não este diagrama.
 
 **O caminho crítico mudou em r2, e a mudança é consequência direta da correção #2.**
 
@@ -1650,7 +1777,7 @@ Consequência prática: **P5-01 deve começar bem antes do que a r1 sugeria** (p
 
 **Trilhas paralelas sugeridas com duas pessoas:**
 - **Trilha A (crítica, infraestrutura):** P0-01 → P5-01 → P5-02 → P5-04 → P5-03 → P5-05.
-- **Trilha B (correção e produto):** P0-02 → P1-01 → P1-02 → P2-01 → P5-06 → P4-01 → P4-02 → P4-03 → P3-01 → P3-02 → P3-03 → P3-04.
+- **Trilha B (correção e produto):** P0-02 → P1-01 → P1-02 → P2-01 → P5-06 → P3-00B → P2-02 → P2-03 (bloqueada por provedor de e-mail, não trava o resto da trilha) → P4-01 → P4-02 → P4-03 → P3-01 → P3-00A → P3-02 → P3-03 → P3-04.
 
 As duas convergem em P5-05 e, de lá, em P6-01.
 
@@ -1706,7 +1833,7 @@ Regra que atravessa toda esta seção, e que nenhuma tarefa futura pode violar: 
 | **Ajuste de inventário** | É uma escrita direta em saldo sob outro nome. Sem motivo obrigatório e auditoria dedicada, vira a porta dos fundos do CRUD proibido | Divergência real entre sistema e contagem física | Definir motivo obrigatório, aprovação e representação em `AuditLog` |
 | **Histórico de movimentação** | `AuditLog` já registra `previousState`/`newState` de cada operação de produto. Uma view de histórico é apresentação, não dado novo | Um participante pedir "como este saldo chegou aqui" | Nenhuma — o dado existe; falta consulta |
 | **Endpoint HTTP de `AuditLog`** | Decisão já registrada no README. Auditoria é dado sensível e não há política de autorização de leitura definida (quem lê o quê: owner da empresa? só o próprio usuário? admin inexistente?) | Requisito de compliance, ou necessidade recorrente do operador que o runbook não atenda | **Alta** — exige a política de autorização antes de qualquer rota |
-| **Reset de senha por e-mail** | Subsistema inteiro (provedor, domínio, tokens de uso único, rate limit, antienumeração) para uma coorte nominalmente conhecida (§3.2) | Coorte deixar de ser nominalmente conhecida, ou o operador não atender em tempo hábil | Provedor de e-mail e domínio verificado |
+| ~~Reset de senha por e-mail~~ *(promovida em 2026-08-28)* | **Deixou de ser adiada.** D3 (`docs/pilot-decisions.md`) tornou recuperação por e-mail requisito **antes** do piloto — ver **P2-03**. Linha mantida riscada para rastreabilidade da mudança de decisão; não é mais uma feature deferida. | — (já destravada por decisão humana) | Provedor de e-mail — **ainda não escolhido**; é o único bloqueio real de P2-03 |
 | **Logout / refresh token / session store** | JWT de 1 dia + revogação via `authVersion` (P2-02) cobre o caso de comprometimento. Refresh existe para encurtar o token de acesso — sem uso em browser público, não paga a complexidade. Um session store trocaria um inteiro comparado no lookup que já existe por um subsistema inteiro | Sessões longas em browser, exigência de expiração curta, ou necessidade de revogar **uma** sessão em vez de todas | Decidir armazenamento do refresh e política de rotação |
 | **Exclusão de conta** | Nenhum participante pediu; `onDelete: Cascade` em `Company` significa que apagar um usuário apaga empresa, estoque e produtos — consequência séria que exige decisão de negócio e de retenção fiscal | Exigência legal (LGPD) ou pedido real | **Alta** — conflito direto entre direito à exclusão e retenção de dado fiscal. Precisa de posição jurídica. |
 | **Edição de metadados de produto** (`description`, `ean`, `ncm`) | Parcialmente uma decisão já tomada: M3-07 estabeleceu que o upsert **não** sobrescreve `description`. Uma rota de edição precisa respeitar isso e nunca tocar saldo/custo | Descrição extraída errada pela IA e o usuário precisar corrigir — provável, e P6 dirá | Escopo restrito a metadados; `quantity`/`unitPrice`/`totalPrice` **fora**, sempre |
@@ -1787,14 +1914,16 @@ O roadmap está concluído quando **todas** as linhas abaixo forem verdadeiras e
 **Portão operacional**
 
 - [ ] Os **onze** runbooks escritos e cada um percorrido ao menos uma vez, **cada um declarando onde é executado**
-- [ ] Script de recuperação de conta funcional, auditado e testado — **e, com P2-02 presente, invalidando os tokens anteriores via `authVersion`**
+- [ ] Script de recuperação de conta funcional, auditado e testado — **invalidando os tokens anteriores via `authVersion`** (permanece como caminho de operador, complementar ao autosserviço de P2-03)
 - [ ] Canal de incidentes ativo
 
-**Portão de autenticação** *(condicional — só se P2-02 entrar)*
+**Portão de autenticação** *(D3, 2026-08-28: deixa de ser condicional — P2-02 e P2-03 são Must have antes do piloto)*
 
 - [ ] Revogação **determinística**: token e troca de senha no mesmo segundo produzem o resultado correto
 - [ ] Token sem a claim `authVersion`, ou com a claim de tipo inválido, é rejeitado com 401
 - [ ] Hash e incremento de `authVersion` gravados na mesma escrita
+- [ ] **P2-03**: código de recuperação armazenado só como hash, nunca em texto puro; uso único; expiração curta; limite de tentativas; resposta idêntica para e-mail existente e inexistente
+- [ ] **P2-03**: confirmação de recuperação bem-sucedida incrementa `authVersion`, invalidando tokens anteriores pelo mesmo mecanismo de P2-02
 
 **Portão de piloto**
 
@@ -1852,7 +1981,7 @@ Ambas dependem de dado de M4-04, e M4-04 entregou **instrumentação**, não **t
 
 ## 13. Decisões que ainda exigem aprovação humana
 
-**Atualização r3.** Cinco das nove foram **resolvidas** em P0-01 (plataforma, banco, frontend, política de cadastro, orçamento Gemini). Restam quatro das originais, e **uma nova** foi levantada pela análise — a única desta rodada, e não é de infraestrutura.
+**Atualização 2026-08-28: todas as dez decisões deste roadmap foram resolvidas ou formalmente classificadas.** Ver `docs/pilot-decisions.md` para o registro completo (D1–D7), com responsável, data e justificativa. Tabela abaixo preservada para rastreabilidade histórica.
 
 #### Resolvidas em 2026-08-15
 
@@ -1863,18 +1992,20 @@ Ambas dependem de dado de M4-04, e M4-04 entregou **instrumentação**, não **t
 | ~~3~~ | Política de `POST /users` | **Código de convite compartilhado** |
 | ~~4~~ | Teto de custo Gemini em USD | **USD 0** → o guard muda de unidade, de USD para cota (P4-02) |
 
-#### Ainda abertas
+#### Resolvidas em 2026-08-28 — ver `docs/pilot-decisions.md`
 
-| # | Decisão | Bloqueia | Por que não posso decidir |
+| # | Decisão | Bloqueava | Resultado |
 |---|---|---|---|
-| 5 | **Máximo de itens por DANFE** | **P4-01** | Deve vir das notas reais do domínio dos participantes. Um valor baixo demais rejeita nota legítima, que é falha de correção. |
-| 6 | **Coorte: quantos, quem, e a janela do piloto** | P6-01, P6-02 | Decisão de produto. |
-| 7 | **Retenção de `ai_call_events`, em dias** | P3-01, P3-03 | Trade-off entre profundidade de análise e os 0,5 GB do Neon Free. |
-| 8 | **`PATCH /me/password` entra no piloto ou fica para depois?** | P2-02 | Recomendo *sim* pelo baixo custo e pela revogação que destrava, mas **não é bloqueador** e é legítimo adiar. |
-| 9 | **Prazo legal de guarda de `AuditLog`** (pendência herdada de M5-01) | Nada neste roadmap; permanece aberta | Input jurídico sobre dado fiscal brasileiro. |
-| **10** | **Budget diário/mensal do Gemini quando o Paid Tier for ativado** *(r4)* | **P6-00**; não bloqueia a implementação de P4-02 | Valor de negócio. O mecanismo é construído em P4-02 modo B; os números vêm do operador. |
+| ~~5~~ | **Máximo de itens por DANFE** | **P4-01** | **APPROVED — D1: 100 itens.** Reavaliar com evidência real de distribuição de itens por DANFE durante a janela. |
+| ~~6~~ | **Coorte: quantos, quem, e a janela do piloto** | P6-01, P6-02 | **APPROVED — D5 (teto de 200, não meta) + D6 (janela de 4 semanas).** "Quem" (composição/seleção de participantes) fica a critério operacional de quem envia o convite — nenhum critério de aceite hoje escrito exige mais que isso. |
+| ~~7~~ | **Retenção de `ai_call_events`, em dias** | P3-01, P3-03 | **APPROVED — D2: 60 dias.** Aplica-se só a `ai_call_events`; não ao `AuditLog` nem ao `ai_usage_ledger`. |
+| ~~8~~ | **`PATCH /me/password` entra no piloto ou fica para depois?** | P2-02 | **APPROVED — D3: entra antes**, com escopo ampliado (recuperação por e-mail vira **P2-03**, nova tarefa, bloqueada só pela escolha — ainda não feita — de provedor de e-mail). |
+| ~~9~~ | **Prazo legal de guarda de `AuditLog`** (pendência herdada de M5-01) | Nada neste roadmap | **DEFERRED_WITH_GATE — D7.** Política do piloto decidida (sem purga automática); o prazo definitivo vira gate de compliance explícito **antes da comercialização**, não bloqueador do piloto. Nenhum número foi inferido. |
+| ~~10~~ | **Budget diário/mensal do Gemini quando o Paid Tier for ativado** *(r4)* | **P6-00**; não bloqueia a implementação de P4-02 | **DEFERRED_WITH_GATE — D4.** Free Tier é o modo aprovado do piloto (sem budget USD arbitrário — a cota do provedor é o limite externo). Paid Tier comercial permanece bloqueado até valores diário/mensal explícitos, calibrados com evidência real do piloto. |
 
 *(A antiga decisão sobre uso de DANFE real sob os termos do free tier foi **resolvida em r4** — deixa de ser decisão aberta e passa a ser o gate operacional **P6-00**.)*
+
+**Dois achados técnicos novos** surgiram da investigação read-only de `AuditLog` que fundamentou D7 — registrados como tarefas explícitas, não decisões humanas pendentes: **P3-00A** e **P3-00B** (ver seções dedicadas na Parte P3 abaixo).
 
 **Nenhuma decisão artificial foi criada.** Itens que a análise de Render/Neon/Gemini poderia ter transformado em "decisão humana" e que resolvi tecnicamente, porque têm resposta correta: valor de `TRUST_PROXY_HOPS` (medido, não escolhido), Dockerfile ou não (o runtime nativo basta), onde a migration roda (o plano Free só permite o build command), onde os scripts rodam (só há um lugar possível), e a estratégia de backup complementar (a mínima gratuita que satisfaz o critério já escrito).
 
@@ -1923,36 +2054,41 @@ Consequências operacionais: o gate **P6-00** verifica a migração; **P4-02** g
 
 ## 14. Ordem recomendada de execução
 
-Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho. **Revista em r2:** P5-01 sobe da posição 12 para a 8, porque a cadeia de infraestrutura passou a ser o caminho crítico (§8).
+Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho. **Revista em r2:** P5-01 sobe da posição 12 para a 8, porque a cadeia de infraestrutura passou a ser o caminho crítico (§8). **Revista em 2026-08-28 (fechamento de P0-01):** P2-02 sai da posição condicional de fim de lista e sobe para logo após P2-01/P5-06 (D3 tornou-a Must have); P2-03 entra como nova tarefa, na mesma vizinhança, mas **bloqueada** por decisão humana ainda em aberto (escolha de provedor de e-mail); P3-00B entra antes de P2-02 por recomendação própria (mesma superfície de risco — novo call site de `AuditLog` tocando credenciais); P3-00A entra junto de P3-02 (mesmo tema — decisões de sugestão).
 
 | # | Tarefa | Por que aqui |
 |---|---|---|
-| 1 | **P0-01** | **Majoritariamente concluída** — resta registrar em `docs/pilot-decisions.md`, resolver as 4 abertas e **levar §13-A à decisão**. O gate operacional do Gemini (projeto sem billing, limites lidos no AI Studio) entra aqui e é pré-requisito de P4-02. |
+| 1 | **P0-01** ✅ | **Concluída em 2026-08-28.** Todas as decisões (D1–D7) registradas em `docs/pilot-decisions.md`; duas com componente `DEFERRED_WITH_GATE` (D4, D7), sem bloquear nenhuma tarefa do piloto — ver relatório de fechamento. |
 | 2 | **P0-02** ✅ | **Única correção de defeito do roadmap.** Cada dia sem ela é um dia em que uma falha do Gemini pode sujar um catálogo. Também precede P3, para que a telemetria meça o pipeline correto. Concluída, commitada (`cfa6ca3`). |
-| 3 | **P1-01** ✅ | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova. Concluída, pendente de commit desta rodada. |
-| 4 | **P1-02** ✅ | Fecha o gargalo do `stockId` e completa o ciclo pela API. Concluída, pendente de commit desta rodada. |
-| 5 | **P2-01** ✅ | S, segurança, sem dependência; precisa preceder a geração do segredo de produção. Concluída, pendente de commit desta rodada. |
-| 6 | **P5-06** ✅ | S, independente; garante que tudo daqui em diante é verificável. Concluída, pendente de commit desta rodada. |
-| 7 | **P4-01** | S; remove a cauda ilimitada antes de existir orçamento a proteger |
-| 8 | **P5-01** | **Início do caminho crítico.** Antecipado em r2: é a primeira das três **M** encadeadas até P6-01, e a que mais atrasa o resto se escorregar. |
-| 9 | **P5-02** | Exige o ambiente de P5-01; consome o `JWT_SECRET` sob a regra de P2-01 |
-| 10 | **P5-04** | Exige ambiente e as rotas de P1; a partir daqui todo deploy é verificado |
-| 11 | **P5-03** | Exige o banco de produção; segunda **M** do caminho crítico |
-| 12 | **P4-02** | O maior risco financeiro fechado. **Já não espera P3-01** — ledger próprio |
-| 13 | **P4-03** | Fecha o contorno do teto por usuário |
-| 14 | **P3-01** | A tarefa mais estrutural de observabilidade, sobre o pipeline já corrigido |
-| 15 | **P3-02** | Depende de P3-01; barata logo em seguida |
-| 16 | **P3-03** | Consultas com o dado já modelado; insumo dos runbooks |
-| 17 | **P3-04** | Exige as duas fontes; precisa existir antes da janela |
-| 18 | **P5-05** | Referencia quase tudo, inclusive P3-04 e P0-02; escrever por último evita reescrever |
-| 19 | **P2-02** *(se aprovada em #8 da §13)* | Única *Should have*; pode entrar durante a janela sem prejuízo |
-| 20 | **P6-01** | Portão de entrada do piloto |
-| 21 | **P6-02** | A janela |
-| 22 | **P6-03** | A conversão em decisão |
+| 3 | **P1-01** ✅ | Bloqueador de piloto, sem dependência, e valida o padrão de rota nova. Concluída, commitada (`d02236e`). |
+| 4 | **P1-02** ✅ | Fecha o gargalo do `stockId` e completa o ciclo pela API. Concluída, commitada (`de36707`). |
+| 5 | **P2-01** ✅ | S, segurança, sem dependência; precisa preceder a geração do segredo de produção. Concluída, commitada (`a1b2c0c`). |
+| 6 | **P5-06** ✅ | S, independente; garante que tudo daqui em diante é verificável. Concluída, commitada (`980624e`). |
+| 7 | **P3-00B** | **Nova (2026-08-28), *Should have*, não bloqueadora.** Recomendada aqui — antes de P2-02/P2-03 — porque as duas tarefas seguintes abrem exatamente o call site de `AuditLog` que ela protege (credenciais). Pode ser adiada sem bloquear nada, mas o custo de fazer agora é baixo (S) e evita retrabalho de revisão depois. |
+| 8 | **P2-02** | **Reclassificada em 2026-08-28 (D3): P0, Must have antes do piloto.** Não é mais condicional. Sem dependência técnica não satisfeita. |
+| 9 | **P2-03** | **Nova (2026-08-28, D3), P0, Must have — mas BLOQUEADA.** Depende de escolha de provedor de e-mail, decisão humana ainda em aberto (não coberta por D1–D7). Não iniciar a implementação antes dessa escolha; o restante da ordem abaixo **não espera** por ela — prossiga para P4-01 em paralelo e volte a P2-03 assim que a decisão chegar, antes de P6-01. |
+| 10 | **P4-01** | **Destravada em 2026-08-28 (D1: N=100).** S; remove a cauda ilimitada antes de existir orçamento a proteger. |
+| 11 | **P5-01** | **Início do caminho crítico.** Antecipado em r2: é a primeira das três **M** encadeadas até P6-01, e a que mais atrasa o resto se escorregar. |
+| 12 | **P5-02** | Exige o ambiente de P5-01; consome o `JWT_SECRET` sob a regra de P2-01 |
+| 13 | **P5-04** | Exige ambiente e as rotas de P1; a partir daqui todo deploy é verificado |
+| 14 | **P5-03** | Exige o banco de produção; segunda **M** do caminho crítico |
+| 15 | **P4-02** | O maior risco financeiro fechado. **Já não espera P3-01** — ledger próprio. Modo A (Free Tier, D4) é o que o piloto usa; Modo B permanece `DEFERRED_WITH_GATE`. |
+| 16 | **P4-03** | Fecha o contorno do teto por usuário |
+| 17 | **P3-01** | A tarefa mais estrutural de observabilidade, sobre o pipeline já corrigido |
+| 18 | **P3-00A** | **Nova (2026-08-28), *Should have*, não bloqueadora.** Slot aqui por afinidade temática com P3-02 (decisões sobre `ProductSimilaritySuggestion`), não por dependência técnica real. |
+| 19 | **P3-02** | Depende de P3-01; barata logo em seguida |
+| 20 | **P3-03** | Consultas com o dado já modelado; insumo dos runbooks. Retenção de `ai_call_events` já decidida (D2: 60 dias). |
+| 21 | **P3-04** | Exige as duas fontes; precisa existir antes da janela |
+| 22 | **P5-05** | Referencia quase tudo, inclusive P3-04 e P0-02; escrever por último evita reescrever |
+| 23 | **P6-01** | Portão de entrada do piloto. **Exige P2-02 e P2-03 concluídas** (Must have, D3) — se P2-03 seguir bloqueada pela escolha de provedor de e-mail nesta altura, **P6-01 não pode começar**. Coorte até 200 (D5, teto não meta). |
+| 24 | **P6-02** | A janela — **4 semanas** (D6, valor concreto, substitui a faixa 2–4). |
+| 25 | **P6-03** | A conversão em decisão |
 
-**Com duas pessoas**, use as duas trilhas de §8: a trilha A (infraestrutura, crítica) e a trilha B (correção e produto) são quase inteiramente independentes e só convergem em P5-05.
+**Com duas pessoas**, use as duas trilhas de §8: a trilha A (infraestrutura, crítica) e a trilha B (correção e produto) são quase inteiramente independentes e só convergem em P5-05. P3-00A/P3-00B/P2-03 podem correr em qualquer trilha sem afetar o caminho crítico de infraestrutura, desde que P2-03 não seja tratada como bloqueadora de P4-01/P5-01 — só bloqueia P6-01.
 
 **Ajuste da r3 à ordem:** com Render e Neon decididos, **P5-01 pode começar imediatamente após P0-01** — não há mais espera por decisão. Duas tarefas ficaram mais baratas do que a r2 supunha (P5-01 perde o Dockerfile e ganha o CLI do Prisma de graça no build; P4-03 tem a política definida), e uma ficou mais cara (P5-03 ganha o caminho de `pg_dump`). O saldo é neutro e as estimativas de §15 não mudam.
+
+**Único bloqueador humano remanescente que impede o caminho crítico de chegar até P6-01 sem interrupção: a escolha de provedor de e-mail para P2-03.** Nenhuma outra tarefa da lista acima espera por decisão humana — é a única lacuna que sobrevive ao fechamento de P0-01.
 
 ## 15. Estimativa agregada
 
@@ -1965,10 +2101,12 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | P4 — Custo e abuso | 3 | 2 / 1 / 0 | 3–5 dias |
 | P5 — Deployment | 6 | 3 / 3 / 0 | 6–9 dias |
 | **Subtotal técnico (P0–P5)** | **19** | **12 / 7 / 0** | **17,5–29,5 dias úteis** |
-| P6 — Piloto | 3 | 2 / 0 / 1 | 1,5 dia de trabalho + **2–4 semanas de janela** |
+| P6 — Piloto | 3 | 2 / 0 / 1 | 1,5 dia de trabalho + **4 semanas de janela** (D6) |
 | **Total** | **22** | | **~19–30 dias úteis + janela de calendário** |
 
 **Delta da r2:** +2 tarefas (**P0-02** M, **P3-04** S) e +2 a +4 dias úteis. A r1 estimava 20 tarefas e 17–26 dias.
+
+**Nota de 2026-08-28 (fechamento de P0-01):** a tabela acima **não foi recalculada** nesta rodada — é puramente decisão/governança, sem implementação. Três tarefas novas entraram no roadmap e não estão contadas acima: **P2-02** deixou de ser *Should have* e passou a **Must have antes do piloto** (D3), **P2-03** (recuperação de senha por e-mail, nova, M estimado mas não confirmado — bloqueada pela escolha de provedor de e-mail, decisão humana ainda em aberto), **P3-00A** e **P3-00B** (S cada, ambas *Should have*, não bloqueadoras do piloto — ver seções dedicadas). O total deixa de ser 22 e passa a **25**, sem que isso represente dias adicionais no caminho crítico até o piloto: P3-00A/P3-00B são pós-piloto/paralelas por classificação própria, e P2-03 só entra em estimativa quando o provedor de e-mail for escolhido.
 
 Com uma pessoa: **5–7 semanas** até o piloto começar, mais a janela. Com duas em trilhas separadas: **4–5 semanas** até o início — a compressão melhorou um pouco em termos relativos, porque desfazer a dependência P3-01 → P4-02 tornou as trilhas mais independentes.
 
