@@ -31,12 +31,15 @@ import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoic
 import { invoiceUpload } from './middlewares/invoice-upload.js';
 import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
 import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
-import { companyStocksParamsSchema, createCompanyBodySchema, listCompaniesQuerySchema, listCompanyStocksQuerySchema, listProductsQuerySchema, loginBodySchema, registerUserBodySchema, stockSuggestionParamsSchema, suggestionDecisionParamsSchema, emptyCommandBodySchema, } from './schemas/http.schemas.js';
+import { companyStocksParamsSchema, createCompanyBodySchema, listCompaniesQuerySchema, listCompanyStocksQuerySchema, listProductsQuerySchema, loginBodySchema, registerUserBodySchema, stockSuggestionParamsSchema, suggestionDecisionParamsSchema, emptyCommandBodySchema, changePasswordBodySchema, } from './schemas/http.schemas.js';
 import { PrismaProductSuggestionRepository } from './repositories/prisma-product-suggestion.repository.js';
 import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from './use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListPendingProductSuggestionsUseCase } from './use-cases/product-suggestions/list-pending-product-suggestions.use-case.js';
 import { ConfirmProductSuggestionController, RejectProductSuggestionController, ListPendingProductSuggestionsController, } from './controllers/product-suggestion.controllers.js';
+import { ChangePasswordUseCase } from './use-cases/change-password/change-password.use-case.js';
+import { ChangePasswordController } from './controllers/change-password.controller.js';
+import { changePasswordRateLimiter } from './middlewares/change-password-rate-limiter.js';
 export function createRoutes(options) {
     const router = Router();
     const { controllers } = options;
@@ -50,6 +53,7 @@ export function createRoutes(options) {
     router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
     router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
     router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
+    router.patch('/me/password', options.authenticate, options.changePasswordRateLimiter, validateBody(changePasswordBodySchema), controllers.changePassword.handle.bind(controllers.changePassword));
     return router;
 }
 // Injeção - Compartilhados / Repositórios
@@ -77,6 +81,9 @@ const tokenProvider = new JoseTokenProvider();
 const ensureAuthenticated = createEnsureAuthenticated({ tokenProvider, userRepository });
 const loginUseCase = new LoginUseCase(userRepository, hashProvider, tokenProvider);
 const loginController = new LoginController(loginUseCase);
+// INJEÇÃO - TROCA DE SENHA
+const changePasswordUseCase = new ChangePasswordUseCase(userRepository, hashProvider, auditLogRepository);
+const changePasswordController = new ChangePasswordController(changePasswordUseCase);
 // INJEÇÃO - EMPRESA
 const createCompanyUseCase = new CreateCompanyUseCase(companyRepository, auditLogRepository);
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
@@ -90,6 +97,7 @@ export const routes = createRoutes({
     uploadRateLimiter,
     loginRateLimiter,
     userRegistrationRateLimiter,
+    changePasswordRateLimiter,
     invoiceUpload: invoiceUpload.single('file'),
     controllers: {
         registerUser: registerUserController,
@@ -101,6 +109,7 @@ export const routes = createRoutes({
         uploadInvoice: uploadInvoiceController,
         confirmSuggestion: confirmSuggestionController,
         rejectSuggestion: rejectSuggestionController,
+        changePassword: changePasswordController,
         listSuggestions: listSuggestionsController,
     },
 });

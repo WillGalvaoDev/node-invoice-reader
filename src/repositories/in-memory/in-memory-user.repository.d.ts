@@ -6,5 +6,6 @@ export declare class InMemoryUserRepository implements IUserRepository {
     }): Promise<IUser>;
     findByEmail(email: string): Promise<IUser | null>;
     findById(id: string): Promise<IUser | null>;
+    updatePassword(userId: string, newPasswordHash: string): Promise<IUser>;
 }
 //# sourceMappingURL=in-memory-user.repository.d.ts.map

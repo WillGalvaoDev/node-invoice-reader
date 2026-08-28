@@ -9,6 +9,7 @@ import { ReadInvoiceUseCase } from '../../src/use-cases/read-invoice/read-invoic
 import { AppError } from '../../src/errors/app-error.js';
 import { PrismaProductSuggestionRepository } from '../../src/repositories/prisma-product-suggestion.repository.js';
 import { PrismaCompanyRepository } from '../../src/repositories/prisma-company.repository.js';
+import { PrismaUserRepository } from '../../src/repositories/prisma-user.repository.js';
 import { ConfirmProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from '../../src/use-cases/product-suggestions/reject-product-suggestion.use-case.js';
 import { ListProductsUseCase } from '../../src/use-cases/list-products/list-products.use-case.js';
@@ -819,6 +820,36 @@ describe('PostgreSQL Integration Gate', () => {
         expect(page.items).toHaveLength(5);
         expect(findManySpy).toHaveBeenCalledTimes(1);
         findManySpy.mockRestore();
+    });
+    it('P2-02: migration adiciona authVersion Int not-null default 1 em users', async () => {
+        const user = await prisma.user.create({
+            data: { email: `authversion-${crypto.randomUUID()}@test.local`, name: 'User', password: 'hash' },
+        });
+        expect(user.authVersion).toBe(1);
+        const columns = await prisma.$queryRaw `
+      SELECT column_name, is_nullable, column_default FROM information_schema.columns
+      WHERE table_name = 'users' AND column_name = 'authVersion'
+    `;
+        expect(columns).toEqual([
+            { column_name: 'authVersion', is_nullable: 'NO', column_default: '1' },
+        ]);
+    });
+    it('P2-02: updatePassword incrementa authVersion na mesma escrita que troca o hash, atomicamente sob concorrência', async () => {
+        const user = await prisma.user.create({
+            data: { email: `atomic-${crypto.randomUUID()}@test.local`, name: 'User', password: 'original-hash' },
+        });
+        const userRepository = new PrismaUserRepository();
+        const [first, second] = await Promise.all([
+            userRepository.updatePassword(user.id, 'hash-a'),
+            userRepository.updatePassword(user.id, 'hash-b'),
+        ]);
+        // Duas escritas concorrentes não podem se perder: o incremento é atômico
+        // no Postgres (UPDATE ... SET authVersion = authVersion + 1), então o
+        // resultado final é sempre +2 em relação ao valor inicial, nunca +1.
+        expect([first.authVersion, second.authVersion].sort()).toEqual([2, 3]);
+        const final = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+        expect(final.authVersion).toBe(3);
+        expect(['hash-a', 'hash-b']).toContain(final.password);
     });
 });
 //# sourceMappingURL=postgres-gate.integration.spec.js.map

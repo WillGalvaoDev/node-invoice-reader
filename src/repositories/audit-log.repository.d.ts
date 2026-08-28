@@ -1,5 +1,5 @@
 export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'READ' | 'UNAUTHORIZED_ACCESS';
-export type AuditEntity = 'COMPANY' | 'INVOICE' | 'PRODUCT';
+export type AuditEntity = 'COMPANY' | 'INVOICE' | 'PRODUCT' | 'USER';
 export type AuditState = Record<string, string | number | boolean | null>;
 /**
  * Representação de leitura: o que o banco devolve, incluindo colunas legadas

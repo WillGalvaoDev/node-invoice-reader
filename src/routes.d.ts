@@ -7,6 +7,7 @@ export interface CreateRoutesOptions {
     uploadRateLimiter: RequestHandler;
     loginRateLimiter: RequestHandler;
     userRegistrationRateLimiter: RequestHandler;
+    changePasswordRateLimiter: RequestHandler;
     invoiceUpload: RequestHandler;
     controllers: {
         registerUser: HttpController;
@@ -19,6 +20,7 @@ export interface CreateRoutesOptions {
         confirmSuggestion: HttpController;
         rejectSuggestion: HttpController;
         listSuggestions: HttpController;
+        changePassword: HttpController;
     };
 }
 export declare function createRoutes(options: CreateRoutesOptions): import("express-serve-static-core").Router;

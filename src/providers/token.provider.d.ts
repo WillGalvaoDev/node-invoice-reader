@@ -1,6 +1,7 @@
 export interface ITokenPayload {
     sub: string;
     email: string;
+    authVersion: number;
 }
 export interface ITokenProvider {
     generateToken(payload: ITokenPayload): Promise<string>;

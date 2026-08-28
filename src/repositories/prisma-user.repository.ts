@@ -46,4 +46,15 @@ export class PrismaUserRepository implements IUserRepository {
     if (!user) return null;
     return user;
   }
+
+  async updatePassword(userId: string, newPasswordHash: string): Promise<IUser> {
+    // Um único UPDATE: authVersion incrementado atomicamente pelo Postgres,
+    // na mesma escrita que troca o hash — sem janela entre as duas mudanças.
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { password: newPasswordHash, authVersion: { increment: 1 } },
+    });
+
+    return updated;
+  }
 }

@@ -7,7 +7,7 @@ export type AuditAction =
   | 'READ'
   | 'UNAUTHORIZED_ACCESS'; // 👈 Adicionado evento explícito de segurança
 
-export type AuditEntity = 'COMPANY' | 'INVOICE' | 'PRODUCT';
+export type AuditEntity = 'COMPANY' | 'INVOICE' | 'PRODUCT' | 'USER';
 
 export type AuditState = Record<string, string | number | boolean | null>;
 
@@ -73,6 +73,8 @@ const AUDIT_EVENT_STATE_KEYS: Record<string, { previous: readonly string[]; next
     previous: ['quantity', 'unitPrice', 'totalPrice'],
     next: ['quantity', 'unitPrice', 'totalPrice'],
   },
+  // Troca de senha (P2-02): nenhum material de senha, só o inteiro de revogação.
+  'USER:UPDATE': { previous: ['authVersion'], next: ['authVersion'] },
 };
 
 const WRITABLE_FIELDS = new Set([

@@ -1,5 +1,8 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { env } from '../../config/env.js';
+function isValidAuthVersion(value) {
+    return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
 export class JoseTokenProvider {
     secret;
     constructor() {
@@ -7,7 +10,7 @@ export class JoseTokenProvider {
         this.secret = new TextEncoder().encode(env.JWT_SECRET);
     }
     async generateToken(payload) {
-        return new SignJWT({ email: payload.email })
+        return new SignJWT({ email: payload.email, authVersion: payload.authVersion })
             .setProtectedHeader({ alg: 'HS256' })
             .setSubject(payload.sub)
             .setIssuedAt()
@@ -20,9 +23,16 @@ export class JoseTokenProvider {
             if (!payload.sub || !payload.email) {
                 return null;
             }
+            // Token emitido antes desta claim existir (ou com claim adulterada/de
+            // tipo inválido) é tratado como inválido — nunca como versão 1 por
+            // omissão. Efeito pretendido: tokens pré-P2-02 deixam de valer.
+            if (!isValidAuthVersion(payload.authVersion)) {
+                return null;
+            }
             return {
                 sub: payload.sub,
                 email: payload.email,
+                authVersion: payload.authVersion,
             };
         }
         catch {

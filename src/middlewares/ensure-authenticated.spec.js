@@ -24,13 +24,13 @@ describe('createEnsureAuthenticated', () => {
     const protectedHandler = vi.fn((request, response) => response.json({ userId: request.user.id }));
     beforeEach(() => {
         vi.clearAllMocks();
-        verifyToken.mockResolvedValue({ sub: userId, email: 'user@test.local' });
-        findById.mockResolvedValue({ id: userId, email: 'user@test.local', name: 'User' });
+        verifyToken.mockResolvedValue({ sub: userId, email: 'user@test.local', authVersion: 1 });
+        findById.mockResolvedValue({ id: userId, email: 'user@test.local', name: 'User', authVersion: 1 });
     });
     async function request(authorization, query = '') {
         const middleware = createEnsureAuthenticated({
             tokenProvider: { verifyToken, generateToken: vi.fn() },
-            userRepository: { findById, findByEmail: vi.fn(), create: vi.fn() },
+            userRepository: { findById, findByEmail: vi.fn(), create: vi.fn(), updatePassword: vi.fn() },
         });
         const router = express.Router();
         router.post('/protected', middleware, protectedHandler);
@@ -82,6 +82,25 @@ describe('createEnsureAuthenticated', () => {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toEqual({ userId });
         expect(verifyToken).toHaveBeenCalledWith('valid-token');
+        expect(protectedHandler).toHaveBeenCalledOnce();
+    });
+    // P2-02: authVersion do token precisa corresponder ao authVersion atual do
+    // usuário. A validação de tipo/presença da claim já aconteceu em
+    // verifyToken (ver jose-token.provider.spec.ts); aqui simulamos apenas o
+    // resultado já normalizado, e testamos a comparação que é responsabilidade
+    // deste middleware.
+    it('rejeita quando authVersion do token diverge do authVersion atual do usuário', async () => {
+        verifyToken.mockResolvedValueOnce({ sub: userId, email: 'user@test.local', authVersion: 1 });
+        findById.mockResolvedValueOnce({ id: userId, email: 'user@test.local', name: 'User', authVersion: 2 });
+        const response = await request('Bearer valid-token');
+        expect(response.status).toBe(401);
+        expect(protectedHandler).not.toHaveBeenCalled();
+    });
+    it('aceita quando authVersion do token corresponde ao authVersion atual do usuário', async () => {
+        verifyToken.mockResolvedValueOnce({ sub: userId, email: 'user@test.local', authVersion: 5 });
+        findById.mockResolvedValueOnce({ id: userId, email: 'user@test.local', name: 'User', authVersion: 5 });
+        const response = await request('Bearer valid-token');
+        expect(response.status).toBe(200);
         expect(protectedHandler).toHaveBeenCalledOnce();
     });
 });

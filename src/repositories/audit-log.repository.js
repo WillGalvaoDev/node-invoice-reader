@@ -14,6 +14,8 @@ const AUDIT_EVENT_STATE_KEYS = {
         previous: ['quantity', 'unitPrice', 'totalPrice'],
         next: ['quantity', 'unitPrice', 'totalPrice'],
     },
+    // Troca de senha (P2-02): nenhum material de senha, só o inteiro de revogação.
+    'USER:UPDATE': { previous: ['authVersion'], next: ['authVersion'] },
 };
 const WRITABLE_FIELDS = new Set([
     'action', 'entity', 'entityId', 'userId', 'companyId', 'stockId',

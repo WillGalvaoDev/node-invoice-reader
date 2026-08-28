@@ -11,6 +11,7 @@ import { ListCompaniesController } from './controllers/list-companies.controller
 import { ListCompanyStocksController } from './controllers/list-company-stocks.controller.js';
 import { UploadInvoiceController } from './controllers/upload-invoice.controller.js';
 import { ConfirmProductSuggestionController, RejectProductSuggestionController, ListPendingProductSuggestionsController, } from './controllers/product-suggestion.controllers.js';
+import { ChangePasswordController } from './controllers/change-password.controller.js';
 import { invoiceUpload } from './middlewares/invoice-upload.js';
 import { AppError } from './errors/app-error.js';
 const userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -35,6 +36,7 @@ describe('HTTP route matrix with injected use cases', () => {
     const confirmSuggestion = vi.fn();
     const rejectSuggestion = vi.fn();
     const listSuggestions = vi.fn();
+    const changePassword = vi.fn();
     const deleteFile = vi.fn().mockResolvedValue(undefined);
     beforeAll(async () => {
         const applicationRoutes = createRoutes({
@@ -42,6 +44,7 @@ describe('HTTP route matrix with injected use cases', () => {
             uploadRateLimiter: pass,
             loginRateLimiter: pass,
             userRegistrationRateLimiter: pass,
+            changePasswordRateLimiter: pass,
             invoiceUpload: invoiceUpload.single('file'),
             controllers: {
                 registerUser: new RegisterUserController({ execute: registerUser }),
@@ -54,6 +57,7 @@ describe('HTTP route matrix with injected use cases', () => {
                 confirmSuggestion: new ConfirmProductSuggestionController({ execute: confirmSuggestion }),
                 rejectSuggestion: new RejectProductSuggestionController({ execute: rejectSuggestion }),
                 listSuggestions: new ListPendingProductSuggestionsController({ execute: listSuggestions }),
+                changePassword: new ChangePasswordController({ execute: changePassword }),
             },
         });
         const app = createApp({ applicationRoutes, healthProbe: vi.fn().mockResolvedValue(undefined), logger });
@@ -80,10 +84,14 @@ describe('HTTP route matrix with injected use cases', () => {
         confirmSuggestion.mockResolvedValue({ id: suggestionId, status: 'CONFIRMED' });
         rejectSuggestion.mockResolvedValue({ id: suggestionId, status: 'REJECTED' });
         listSuggestions.mockResolvedValue([{ id: suggestionId, status: 'PENDING' }]);
+        changePassword.mockResolvedValue(undefined);
     });
     afterAll(() => new Promise((resolve) => server.close(() => resolve())));
     const jsonPost = (path, body) => fetch(`${baseUrl}${path}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const jsonPatch = (path, body) => fetch(`${baseUrl}${path}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     it('POST /users é público, valida, encaminha body ao use case e devolve o envelope padrão', async () => {
         const response = await jsonPost('/users', { name: 'User Name', email: 'USER@Test.Local', password: 'password123' });
@@ -170,6 +178,20 @@ describe('HTTP route matrix with injected use cases', () => {
         expect(confirmSuggestion).toHaveBeenCalledWith({ suggestionId, userId });
         expect(rejectSuggestion).toHaveBeenCalledWith({ suggestionId, userId });
     });
+    it('PATCH /me/password encaminha identidade confiável e devolve 204 sem corpo', async () => {
+        const response = await jsonPatch('/me/password', { currentPassword: 'current-password', newPassword: 'new-password' });
+        expect(response.status).toBe(204);
+        expect(await response.text()).toBe('');
+        expect(changePassword).toHaveBeenCalledWith({
+            userId, currentPassword: 'current-password', newPassword: 'new-password', requestId: expect.any(String),
+        });
+    });
+    it('PATCH /me/password traduz senha atual incorreta do use case para 401 via AppError', async () => {
+        changePassword.mockRejectedValueOnce(new AppError('Senha atual incorreta.', 401));
+        const response = await jsonPatch('/me/password', { currentPassword: 'wrong-password', newPassword: 'new-password' });
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toEqual({ status: 'error', message: 'Senha atual incorreta.' });
+    });
     it('POST /invoices/upload entrega multipart ao use case sem Gemini real', async () => {
         const form = new FormData();
         form.append('stockId', stockId);
@@ -193,7 +215,10 @@ describe('HTTP route matrix with injected use cases', () => {
         expect((await fetch(`${baseUrl}/companies/${companyId}/stocks?limit=201`)).status).toBe(400);
         expect((await fetch(`${baseUrl}/stocks/not-uuid/suggestions`)).status).toBe(400);
         expect((await jsonPost(`/suggestions/${suggestionId}/confirm`, { productId: stockId })).status).toBe(400);
+        expect((await jsonPatch('/me/password', { currentPassword: 'short', newPassword: 'new-password' })).status).toBe(400);
+        expect((await jsonPatch('/me/password', { currentPassword: 'current-password' })).status).toBe(400);
         expect(registerUser).not.toHaveBeenCalled();
+        expect(changePassword).not.toHaveBeenCalled();
         expect(listCompanies).not.toHaveBeenCalled();
         expect(listCompanyStocks).not.toHaveBeenCalled();
         expect(listProducts).not.toHaveBeenCalled();

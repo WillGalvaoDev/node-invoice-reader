@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export declare const passwordSchema: z.ZodString;
 export declare const loginBodySchema: z.ZodObject<{
     email: z.ZodString;
     password: z.ZodString;
@@ -38,4 +39,8 @@ export declare const suggestionDecisionParamsSchema: z.ZodObject<{
     suggestionId: z.ZodString;
 }, z.core.$strict>;
 export declare const emptyCommandBodySchema: z.ZodObject<{}, z.core.$strict>;
+export declare const changePasswordBodySchema: z.ZodObject<{
+    currentPassword: z.ZodString;
+    newPassword: z.ZodString;
+}, z.core.$strict>;
 //# sourceMappingURL=http.schemas.d.ts.map

@@ -9,11 +9,13 @@ class FakeHashProvider {
     }
 }
 class FakeTokenProvider {
+    lastPayload;
     async generateToken(payload) {
+        this.lastPayload = payload;
         return `mocked-jwt-token-for-${payload.sub}`;
     }
     async verifyToken(_token) {
-        return { sub: 'user-1', email: 'john@example.com' };
+        return { sub: 'user-1', email: 'john@example.com', authVersion: 1 };
     }
 }
 describe('Login Use Case', () => {
@@ -46,6 +48,10 @@ describe('Login Use Case', () => {
         expect(logged).not.toContain('john@example.com');
         expect(consoleLog).not.toHaveBeenCalled();
         consoleLog.mockRestore();
+    });
+    it('embute o authVersion atual do usuário no token gerado', async () => {
+        await sut.execute({ email: 'john@example.com', password: 'password123' });
+        expect(tokenProvider.lastPayload).toMatchObject({ sub: 'user-1', authVersion: 1 });
     });
     it('should not be able to authenticate with wrong password', async () => {
         await expect(sut.execute({

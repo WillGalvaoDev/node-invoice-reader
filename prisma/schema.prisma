@@ -7,11 +7,15 @@ generator client {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
-  password  String
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  email       String   @unique
+  name        String
+  password    String
+  // Revogação determinística de token (P2-02): comparado com a claim do JWT,
+  // não com timestamp — incrementar aqui invalida todo token emitido antes,
+  // sem depender de comparação entre relógios distintos (ver justificativa na tarefa).
+  authVersion Int      @default(1)
+  createdAt   DateTime @default(now())
 
   // Relacionamentos
   ownedCompanies     Company[]                     @relation("CompanyOwner")

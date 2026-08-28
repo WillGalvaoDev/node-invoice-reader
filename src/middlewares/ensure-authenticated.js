@@ -18,6 +18,11 @@ export function createEnsureAuthenticated({ tokenProvider, userRepository }) {
             const user = await userRepository.findById(decoded.sub);
             if (!user)
                 throw new AppError('Usuário não encontrado ou conta removida.', 401);
+            // Revogação determinística (P2-02): comparação de inteiros, não de timestamp.
+            // verifyToken já garante que decoded.authVersion é um inteiro válido quando não-nulo.
+            if (user.authVersion !== decoded.authVersion) {
+                throw new AppError('JWT token inválido ou expirado.', 401);
+            }
             request.user = { id: decoded.sub };
             next();
         }

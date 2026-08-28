@@ -47,6 +47,7 @@ import {
   stockSuggestionParamsSchema,
   suggestionDecisionParamsSchema,
   emptyCommandBodySchema,
+  changePasswordBodySchema,
 } from './schemas/http.schemas.js';
 import { PrismaProductSuggestionRepository } from './repositories/prisma-product-suggestion.repository.js';
 import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
@@ -57,6 +58,9 @@ import {
   RejectProductSuggestionController,
   ListPendingProductSuggestionsController,
 } from './controllers/product-suggestion.controllers.js';
+import { ChangePasswordUseCase } from './use-cases/change-password/change-password.use-case.js';
+import { ChangePasswordController } from './controllers/change-password.controller.js';
+import { changePasswordRateLimiter } from './middlewares/change-password-rate-limiter.js';
 
 interface HttpController {
   handle: RequestHandler;
@@ -67,6 +71,7 @@ export interface CreateRoutesOptions {
   uploadRateLimiter: RequestHandler;
   loginRateLimiter: RequestHandler;
   userRegistrationRateLimiter: RequestHandler;
+  changePasswordRateLimiter: RequestHandler;
   invoiceUpload: RequestHandler;
   controllers: {
     registerUser: HttpController;
@@ -79,6 +84,7 @@ export interface CreateRoutesOptions {
     confirmSuggestion: HttpController;
     rejectSuggestion: HttpController;
     listSuggestions: HttpController;
+    changePassword: HttpController;
   };
 }
 
@@ -95,6 +101,7 @@ export function createRoutes(options: CreateRoutesOptions) {
   router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
   router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
   router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
+  router.patch('/me/password', options.authenticate, options.changePasswordRateLimiter, validateBody(changePasswordBodySchema), controllers.changePassword.handle.bind(controllers.changePassword));
   return router;
 }
 
@@ -136,6 +143,10 @@ const ensureAuthenticated = createEnsureAuthenticated({ tokenProvider, userRepos
 const loginUseCase = new LoginUseCase(userRepository, hashProvider, tokenProvider);
 const loginController = new LoginController(loginUseCase);
 
+// INJEÇÃO - TROCA DE SENHA
+const changePasswordUseCase = new ChangePasswordUseCase(userRepository, hashProvider, auditLogRepository);
+const changePasswordController = new ChangePasswordController(changePasswordUseCase);
+
 // INJEÇÃO - EMPRESA
 const createCompanyUseCase = new CreateCompanyUseCase(
   companyRepository,
@@ -159,6 +170,7 @@ export const routes = createRoutes({
   uploadRateLimiter,
   loginRateLimiter,
   userRegistrationRateLimiter,
+  changePasswordRateLimiter,
   invoiceUpload: invoiceUpload.single('file'),
   controllers: {
     registerUser: registerUserController,
@@ -170,6 +182,7 @@ export const routes = createRoutes({
     uploadInvoice: uploadInvoiceController,
     confirmSuggestion: confirmSuggestionController,
     rejectSuggestion: rejectSuggestionController,
+    changePassword: changePasswordController,
     listSuggestions: listSuggestionsController,
   },
 });

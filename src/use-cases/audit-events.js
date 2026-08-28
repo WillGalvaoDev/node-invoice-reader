@@ -55,5 +55,17 @@ export const auditEvents = {
             newState: figures(next),
         });
     },
+    /** Nenhum material de senha entra aqui — só o inteiro de revogação, antes e depois. */
+    userPasswordChanged({ userId, previousAuthVersion, newAuthVersion }) {
+        return sealed({
+            action: 'UPDATE',
+            entity: 'USER',
+            entityId: userId,
+            description: 'Senha do usuário alterada.',
+            userId,
+            previousState: { authVersion: previousAuthVersion },
+            newState: { authVersion: newAuthVersion },
+        });
+    },
 };
 //# sourceMappingURL=audit-events.js.map

@@ -5,5 +5,6 @@ export declare class PrismaUserRepository implements IUserRepository {
     }): Promise<IUser>;
     findByEmail(email: string): Promise<IUser | null>;
     findById(id: string): Promise<IUser | null>;
+    updatePassword(userId: string, newPasswordHash: string): Promise<IUser>;
 }
 //# sourceMappingURL=prisma-user.repository.d.ts.map

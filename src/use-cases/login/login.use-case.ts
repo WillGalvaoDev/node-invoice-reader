@@ -43,6 +43,7 @@ export class LoginUseCase {
     const token = await this.tokenProvider.generateToken({
       sub: user.id ?? '',
       email: user.email,
+      authVersion: user.authVersion ?? 1,
     });
 
     return { token };

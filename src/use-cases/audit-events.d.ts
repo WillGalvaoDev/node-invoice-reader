@@ -43,5 +43,11 @@ export declare const auditEvents: {
         previous: ProductAuditFigures | null;
         next: ProductAuditFigures;
     }): AuditLogWrite;
+    /** Nenhum material de senha entra aqui — só o inteiro de revogação, antes e depois. */
+    userPasswordChanged({ userId, previousAuthVersion, newAuthVersion }: {
+        userId: string;
+        previousAuthVersion: number;
+        newAuthVersion: number;
+    }): AuditLogWrite;
 };
 //# sourceMappingURL=audit-events.d.ts.map

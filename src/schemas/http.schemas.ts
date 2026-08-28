@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { cnpjSchema } from './cnpj.schema.js';
 
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
-const passwordSchema = z.string().min(8).max(128);
+export const passwordSchema = z.string().min(8).max(128);
 const idSchema = z.string().uuid();
 
 export const loginBodySchema = z.strictObject({
@@ -46,3 +46,8 @@ export const uploadInvoiceBodySchema = z.strictObject({
 export const stockSuggestionParamsSchema = z.strictObject({ stockId: idSchema });
 export const suggestionDecisionParamsSchema = z.strictObject({ suggestionId: idSchema });
 export const emptyCommandBodySchema = z.strictObject({});
+
+export const changePasswordBodySchema = z.strictObject({
+  currentPassword: passwordSchema,
+  newPassword: passwordSchema,
+});
