@@ -8,6 +8,7 @@ const childEnvironment = {
   DATABASE_URL: testDatabaseUrl,
   JWT_SECRET: process.env.JWT_SECRET || 'integration-test-jwt-secret-32-chars-min',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || 'integration-test-gemini-key',
+  INVITE_CODE: process.env.INVITE_CODE || 'integration-test-invite-code',
 };
 
 function run(command, args, options = {}) {

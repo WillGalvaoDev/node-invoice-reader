@@ -8,6 +8,7 @@ export interface CreateRoutesOptions {
     loginRateLimiter: RequestHandler;
     userRegistrationRateLimiter: RequestHandler;
     changePasswordRateLimiter: RequestHandler;
+    createCompanyRateLimiter: RequestHandler;
     invoiceUpload: RequestHandler;
     controllers: {
         registerUser: HttpController;

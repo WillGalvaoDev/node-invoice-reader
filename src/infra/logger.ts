@@ -36,6 +36,7 @@ const SENSITIVE_KEYS = new Set([
   'geminiapikey',
   'secret',
   'jwtsecret',
+  'invitecode',
 ]);
 const LEVEL_PRIORITY: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 

@@ -6,9 +6,11 @@ export class RegisterUserController {
   constructor(private registerUserUseCase: RegisterUserUseCase) {}
 
   async handle(req: Request, res: Response): Promise<Response> {
-    const { name, email, password } = req.body;
+    const { name, email, password, inviteCode } = req.body;
 
-    const user = await this.registerUserUseCase.execute({ name, email, password });
+    const user = await this.registerUserUseCase.execute({
+      name, email, password, ...(inviteCode !== undefined && { inviteCode }),
+    });
 
     return res.status(201).json({ status: 'success', data: user });
   }

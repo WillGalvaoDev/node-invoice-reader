@@ -6,8 +6,10 @@ export class RegisterUserController {
         this.registerUserUseCase = registerUserUseCase;
     }
     async handle(req, res) {
-        const { name, email, password } = req.body;
-        const user = await this.registerUserUseCase.execute({ name, email, password });
+        const { name, email, password, inviteCode } = req.body;
+        const user = await this.registerUserUseCase.execute({
+            name, email, password, ...(inviteCode !== undefined && { inviteCode }),
+        });
         return res.status(201).json({ status: 'success', data: user });
     }
 }

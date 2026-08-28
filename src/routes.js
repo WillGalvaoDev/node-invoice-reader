@@ -40,6 +40,8 @@ import { ConfirmProductSuggestionController, RejectProductSuggestionController, 
 import { ChangePasswordUseCase } from './use-cases/change-password/change-password.use-case.js';
 import { ChangePasswordController } from './controllers/change-password.controller.js';
 import { changePasswordRateLimiter } from './middlewares/change-password-rate-limiter.js';
+import { createCompanyRateLimiter } from './middlewares/create-company-rate-limiter.js';
+import { env } from './config/env.js';
 export function createRoutes(options) {
     const router = Router();
     const { controllers } = options;
@@ -47,7 +49,7 @@ export function createRoutes(options) {
     router.post('/users', options.userRegistrationRateLimiter, validateBody(registerUserBodySchema), controllers.registerUser.handle.bind(controllers.registerUser));
     router.post('/login', options.loginRateLimiter, validateBody(loginBodySchema), controllers.login.handle.bind(controllers.login));
     router.get('/products', options.authenticate, validateQuery(listProductsQuerySchema), controllers.listProducts.handle.bind(controllers.listProducts));
-    router.post('/companies', options.authenticate, validateBody(createCompanyBodySchema), controllers.createCompany.handle.bind(controllers.createCompany));
+    router.post('/companies', options.authenticate, options.createCompanyRateLimiter, validateBody(createCompanyBodySchema), controllers.createCompany.handle.bind(controllers.createCompany));
     router.get('/companies', options.authenticate, validateQuery(listCompaniesQuerySchema), controllers.listCompanies.handle.bind(controllers.listCompanies));
     router.get('/companies/:companyId/stocks', options.authenticate, validateParams(companyStocksParamsSchema), validateQuery(listCompanyStocksQuerySchema), controllers.listCompanyStocks.handle.bind(controllers.listCompanyStocks));
     router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
@@ -74,7 +76,7 @@ const listProductsController = new ListProductsController(listProductsUseCase);
 const userRepository = new PrismaUserRepository();
 const hashProvider = new Argon2HashProvider();
 // Injeção - Cadastro
-const registerUserUseCase = new RegisterUserUseCase(userRepository, hashProvider);
+const registerUserUseCase = new RegisterUserUseCase(userRepository, hashProvider, env.INVITE_CODE);
 const registerUserController = new RegisterUserController(registerUserUseCase);
 // INJEÇÃO - LOGIN
 const tokenProvider = new JoseTokenProvider();
@@ -98,6 +100,7 @@ export const routes = createRoutes({
     loginRateLimiter,
     userRegistrationRateLimiter,
     changePasswordRateLimiter,
+    createCompanyRateLimiter,
     invoiceUpload: invoiceUpload.single('file'),
     controllers: {
         registerUser: registerUserController,

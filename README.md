@@ -43,9 +43,9 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | Método | Rota | Autenticação | Descrição |
 |---|---|---|---|
 | `GET`  | `/health` | pública | `SELECT 1` real no Postgres; `503` se o banco estiver indisponível ou o processo em shutdown. |
-| `POST` | `/users` | pública, rate limit 5/hora por IP | Cadastro de usuário. Senha com Argon2. |
+| `POST` | `/users` | pública, rate limit 5/hora por IP | Cadastro de usuário. Exige `inviteCode` correto (coorte controlada do piloto); ausente ou incorreto devolve o mesmo `403` genérico. Senha com Argon2. |
 | `POST` | `/login` | pública, rate limit 10/15min por IP | Autenticação; devolve JWT. |
-| `POST` | `/companies` | Bearer JWT | Cria empresa + estoque principal em uma transação atômica. |
+| `POST` | `/companies` | Bearer JWT, rate limit 5/min por usuário | Cria empresa + estoque principal em uma transação atômica. |
 | `GET`  | `/companies` | Bearer JWT | Lista paginada (cursor) das empresas acessíveis ao usuário — owned e onde ele é colaborador —, com o papel (`OWNER`/`COLLABORATOR`) de cada uma. |
 | `GET`  | `/companies/:companyId/stocks` | Bearer JWT | Lista paginada (cursor) dos estoques visíveis da empresa. Owner vê todos; colaborador só os que têm `StockPermission.canView = true`. `404` (sem distinguir "não existe" de "sem acesso") se o usuário não tiver nenhuma relação com a empresa. |
 | `GET`  | `/products` | Bearer JWT | Lista paginada (cursor) por `stockId`. Exige acesso ao estoque. |
@@ -122,6 +122,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 | `DATABASE_URL` | sim | — | Postgres. |
 | `JWT_SECRET` | sim | — | Assinatura dos tokens (HS256). Mínimo de **32 caracteres** — o boot falha abaixo disso. Gerar com `openssl rand -base64 48`. |
 | `GEMINI_API_KEY` | sim | — | Google Gemini. |
+| `INVITE_CODE` | sim | — | Código de convite compartilhado exigido em `POST /users` (P4-03). Mínimo de **8 caracteres**. Nunca versionado; trocar exige só reiniciar o serviço, sem novo build. |
 | `PORT` | não | `3333` | Porta HTTP. |
 | `TRUST_PROXY_HOPS` | não | `0` | Número exato de proxies reversos confiáveis (0–10). Só alterar se a API estiver atrás de proxy conhecido. |
 | `CORS_ALLOWED_ORIGINS` | não | vazio | Allowlist HTTP(S) separada por vírgula. Sem wildcard, sem credenciais. |
@@ -166,7 +167,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 
 ```bash
 npm ci
-cp .env.example .env   # preencher DATABASE_URL, JWT_SECRET (>= 32 caracteres, ex.: `openssl rand -base64 48`), GEMINI_API_KEY
+cp .env.example .env   # preencher DATABASE_URL, JWT_SECRET (>= 32 caracteres, ex.: `openssl rand -base64 48`), GEMINI_API_KEY, INVITE_CODE (>= 8 caracteres)
 npm run prisma:generate
 npm run dev             # tsx watch, recarrega em mudanças
 ```
@@ -186,6 +187,6 @@ Para rodar a suíte de integração contra Postgres real é necessário Docker (
 * **Política expand/contract é obrigatória, não recomendada**, por causa do ponto acima: toda migration precisa ser compatível com a versão anterior da aplicação, porque essa versão pode voltar a rodar contra o schema novo após um rollback. Verificado: nenhuma das migrations existentes viola isso.
 * **`prisma.config.ts` só exige `DATABASE_URL`** (não `JWT_SECRET`/`GEMINI_API_KEY`) — decoupling deliberado de `src/config/env.ts`, cujo carregamento do módulo dispara a validação completa do ambiente. Rodar uma migration nunca deveria exigir a chave do Gemini.
 * **`DATABASE_URL`** deve usar a string *pooled* do Neon, com `sslmode=require`.
-* Segredos (`JWT_SECRET`, `GEMINI_API_KEY`, código de convite) vão **só** no painel do Render — nenhum em arquivo versionado.
+* Segredos (`JWT_SECRET`, `GEMINI_API_KEY`, `INVITE_CODE`) vão **só** no painel do Render — nenhum em arquivo versionado.
 
 Fora de escopo desta preparação: provisionar a conta Render/Neon, o primeiro deploy real, e a verificação empírica de `/health`/`SIGTERM` contra o ambiente real — isso é o restante de P5-01 e depende de acesso à conta, não de código.

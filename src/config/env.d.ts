@@ -4,6 +4,7 @@ export declare function createEnv(environment: Environment): {
     DATABASE_URL: string;
     JWT_SECRET: string;
     GEMINI_API_KEY: string;
+    INVITE_CODE: string;
     PORT: number;
     GEMINI_TIMEOUT_MS: number;
     GEMINI_MAX_ATTEMPTS: number;
@@ -18,6 +19,7 @@ export declare const env: {
     DATABASE_URL: string;
     JWT_SECRET: string;
     GEMINI_API_KEY: string;
+    INVITE_CODE: string;
     PORT: number;
     GEMINI_TIMEOUT_MS: number;
     GEMINI_MAX_ATTEMPTS: number;

@@ -13,6 +13,7 @@ const SENSITIVE_KEYS = new Set([
     'geminiapikey',
     'secret',
     'jwtsecret',
+    'invitecode',
 ]);
 const LEVEL_PRIORITY = { debug: 10, info: 20, warn: 30, error: 40 };
 function normalizeKey(key) {

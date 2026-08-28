@@ -11,6 +11,10 @@ export const registerUserBodySchema = z.strictObject({
     name: z.string().trim().min(2).max(120),
     email: emailSchema,
     password: passwordSchema,
+    // Opcional no schema deliberadamente (P4-03): ausência e valor incorreto
+    // devem cair no mesmo 403 genérico do use case, sem distinção que revele
+    // a existência de uma política de convite.
+    inviteCode: z.string().min(1).max(200).optional(),
 });
 export const createCompanyBodySchema = z.strictObject({
     name: z.string().trim().min(2).max(120),

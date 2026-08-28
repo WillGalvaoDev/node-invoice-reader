@@ -4,12 +4,14 @@ interface IRegisterUserRequest {
     name: string;
     email: string;
     password: string;
+    inviteCode?: string;
 }
 export declare class RegisterUserUseCase {
     private userRepository;
     private hashProvider;
-    constructor(userRepository: IUserRepository, hashProvider: IHashProvider);
-    execute({ name, email, password }: IRegisterUserRequest): Promise<IUser>;
+    private inviteCode;
+    constructor(userRepository: IUserRepository, hashProvider: IHashProvider, inviteCode: string);
+    execute({ name, email, password, inviteCode }: IRegisterUserRequest): Promise<IUser>;
 }
 export {};
 //# sourceMappingURL=register-user.use-case.d.ts.map

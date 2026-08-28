@@ -8,6 +8,7 @@ export declare const registerUserBodySchema: z.ZodObject<{
     name: z.ZodString;
     email: z.ZodString;
     password: z.ZodString;
+    inviteCode: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const createCompanyBodySchema: z.ZodObject<{
     name: z.ZodString;

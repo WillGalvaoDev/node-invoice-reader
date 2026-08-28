@@ -45,6 +45,7 @@ describe('HTTP route matrix with injected use cases', () => {
             loginRateLimiter: pass,
             userRegistrationRateLimiter: pass,
             changePasswordRateLimiter: pass,
+            createCompanyRateLimiter: pass,
             invoiceUpload: invoiceUpload.single('file'),
             controllers: {
                 registerUser: new RegisterUserController({ execute: registerUser }),
@@ -101,6 +102,13 @@ describe('HTTP route matrix with injected use cases', () => {
             status: 'success',
             data: { id: userId, name: 'User', email: 'user@test.local' },
         });
+    });
+    it('POST /users encaminha inviteCode ao use case quando enviado (P4-03)', async () => {
+        const response = await jsonPost('/users', {
+            name: 'User Name', email: 'user2@test.local', password: 'password123', inviteCode: 'shared-secret',
+        });
+        expect(response.status).toBe(201);
+        expect(registerUser).toHaveBeenCalledWith(expect.objectContaining({ inviteCode: 'shared-secret' }));
     });
     it('POST /users traduz conflito de e-mail duplicado do use case para 409 via AppError (regressão M6-01)', async () => {
         registerUser.mockRejectedValueOnce(new AppError('Já existe um usuário cadastrado com este email.', 409));

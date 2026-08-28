@@ -14,6 +14,14 @@ function requireJwtSecret(environment) {
     }
     return value;
 }
+const INVITE_CODE_MIN_LENGTH = 8;
+function requireInviteCode(environment) {
+    const value = required(environment, 'INVITE_CODE');
+    if (value.length < INVITE_CODE_MIN_LENGTH) {
+        throw new Error(`Variável de ambiente inválida: INVITE_CODE deve ter no mínimo ${INVITE_CODE_MIN_LENGTH} caracteres.`);
+    }
+    return value;
+}
 function parsePort(value) {
     if (value === undefined || value.trim() === '')
         return 3333;
@@ -67,6 +75,9 @@ export function createEnv(environment) {
         DATABASE_URL: required(environment, 'DATABASE_URL'),
         JWT_SECRET: requireJwtSecret(environment),
         GEMINI_API_KEY: required(environment, 'GEMINI_API_KEY'),
+        // Cadastro controlado durante o piloto (P4-03, decisão de P0-01): shared secret
+        // de entrada, não versionado. Nunca lido diretamente de env dentro do use case.
+        INVITE_CODE: requireInviteCode(environment),
         PORT: parsePort(environment.PORT),
         GEMINI_TIMEOUT_MS: parseIntegerInRange(environment.GEMINI_TIMEOUT_MS, 30_000, 'GEMINI_TIMEOUT_MS', 1_000, 30_000),
         GEMINI_MAX_ATTEMPTS: parseIntegerInRange(environment.GEMINI_MAX_ATTEMPTS, 2, 'GEMINI_MAX_ATTEMPTS', 1, 2),

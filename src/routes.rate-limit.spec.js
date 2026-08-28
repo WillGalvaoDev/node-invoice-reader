@@ -5,6 +5,7 @@ import { configureTrustProxy } from './config/trust-proxy.js';
 const controllerHandles = vi.hoisted(() => ({
     login: vi.fn((_request, response) => response.status(200).json({ status: 'success' })),
     registerUser: vi.fn((_request, response) => response.status(201).json({ status: 'success' })),
+    createCompany: vi.fn((_request, response) => response.status(201).json({ status: 'success' })),
 }));
 vi.mock('./controllers/login.controller.js', () => ({ LoginController: class {
         handle = controllerHandles.login;
@@ -13,7 +14,7 @@ vi.mock('./controllers/register-user.controller.js', () => ({ RegisterUserContro
         handle = controllerHandles.registerUser;
     } }));
 vi.mock('./controllers/create-company.controller.js', () => ({ CreateCompanyController: class {
-        handle = vi.fn();
+        handle = controllerHandles.createCompany;
     } }));
 vi.mock('./controllers/list-products.controller.js', () => ({ ListProductsController: class {
         handle = vi.fn();
@@ -62,6 +63,13 @@ describe('rate limiting HTTP de autenticação', () => {
             body: JSON.stringify(body),
         });
     }
+    async function postCompany(ip) {
+        return fetch(`${baseUrl}/companies`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+            body: JSON.stringify({ name: 'Empresa Teste', cnpj: '11222333000181' }),
+        });
+    }
     it('permite dez logins e bloqueia o décimo primeiro sem executar o controller', async () => {
         for (let attempt = 0; attempt < 10; attempt += 1) {
             expect((await post('/login', '198.51.100.20')).status).toBe(200);
@@ -84,6 +92,15 @@ describe('rate limiting HTTP de autenticação', () => {
         for (let attempt = 0; attempt < 10; attempt += 1)
             await post('/login', '198.51.100.40');
         expect((await post('/login', '198.51.100.41')).status).toBe(200);
+    });
+    it('permite cinco criações de empresa e bloqueia a sexta sem executar o controller (P4-03)', async () => {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            expect((await postCompany('198.51.100.50')).status).toBe(201);
+        }
+        const blocked = await postCompany('198.51.100.50');
+        expect(blocked.status).toBe(429);
+        expect(blocked.headers.get('retry-after')).toBeTruthy();
+        expect(controllerHandles.createCompany).toHaveBeenCalledTimes(5);
     });
 });
 //# sourceMappingURL=routes.rate-limit.spec.js.map
