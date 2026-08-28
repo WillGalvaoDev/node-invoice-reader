@@ -151,6 +151,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 * **Indisponibilidade da IA nunca vira decisão de domínio.** O resultado da similaridade é uma união discriminada de três estados, e não `null`, justamente para que o compilador impeça `unavailable` de ser lido como `no_match`. Uma falha de transporte não pode criar produto no catálogo do cliente.
 * **Auditoria não tem endpoint de leitura HTTP hoje.** `IAuditLogRepository.findByCompanyId`/`findByUserId` existem, são testados e indexados, mas não há rota que os exponha — decisão deliberada de manter o escopo da API restrito ao fluxo operacional até haver necessidade real de um endpoint de auditoria.
 * **`AuditLog` não tem política de retenção automática.** Decisão conservadora: nenhuma exclusão automática até haver requisito legal/de negócio definido para o prazo de guarda de dado fiscal.
+* **`prisma.config.ts` não importa `src/config/env.ts`.** Faria o carregamento do módulo disparar `createEnv(process.env)` inteiro — exigindo `JWT_SECRET` e `GEMINI_API_KEY` só para rodar `prisma migrate`/`validate`/`generate` (P5-01). `resolveDatabaseUrl` (`src/config/database-url.ts`) lê e valida só `DATABASE_URL`.
 * **Artefatos de build (`.js`/`.d.ts`) são commitados junto do `.ts`.** Os testes importam por caminho `.js` (convenção `nodenext`); rode `npm run build` após editar `.ts` **antes de commitar** — ou o Vitest pode resolver o arquivo compilado desatualizado em vez do fonte, e o CI recusa o merge (`npm run verify:artifacts`, P5-06): o guard roda o build a partir do checkout limpo e falha se ele sujar qualquer artefato versionado, usando `git status --porcelain` como fonte de verdade em vez de uma lista manual de arquivos.
 
 ## Limitações conhecidas
@@ -171,3 +172,20 @@ npm run dev             # tsx watch, recarrega em mudanças
 ```
 
 Para rodar a suíte de integração contra Postgres real é necessário Docker (`docker-compose.test.yml` sobe um banco efêmero isolado, nunca a `DATABASE_URL` de desenvolvimento).
+
+---
+
+## Deploy (Render + Neon)
+
+**Status: comandos e migration prontos (P5-01); deploy real ainda não executado — pendente de provisionamento de conta.** Descrito aqui para ser reprodutível assim que a conta existir; nenhuma das afirmações abaixo foi verificada contra o ambiente real do Render ainda.
+
+* **Sem Dockerfile.** O runtime nativo Node do Render usa build/start commands; `npm prune --omit=dev` + `verify:production` já validam o grafo de produção no CI. Um Dockerfile acrescentaria superfície sem resolver nada que o runtime nativo não resolva — revisitar só se o build vier a exigir binário de sistema.
+* **Build command:** `npm ci && npm run build && npx prisma migrate deploy`
+* **Start command:** `npm start`
+* **Migration no build, não em Pre-Deploy Command** (exclusivo de planos pagos no Render). Efeito: `prisma` existe no momento do build (antes do `npm prune`), o que resolve o problema de empacotamento sem exigir Dockerfile — mas a migration roda **antes** da nova versão entrar em tráfego e **não é desfeita por rollback**.
+* **Política expand/contract é obrigatória, não recomendada**, por causa do ponto acima: toda migration precisa ser compatível com a versão anterior da aplicação, porque essa versão pode voltar a rodar contra o schema novo após um rollback. Verificado: nenhuma das migrations existentes viola isso.
+* **`prisma.config.ts` só exige `DATABASE_URL`** (não `JWT_SECRET`/`GEMINI_API_KEY`) — decoupling deliberado de `src/config/env.ts`, cujo carregamento do módulo dispara a validação completa do ambiente. Rodar uma migration nunca deveria exigir a chave do Gemini.
+* **`DATABASE_URL`** deve usar a string *pooled* do Neon, com `sslmode=require`.
+* Segredos (`JWT_SECRET`, `GEMINI_API_KEY`, código de convite) vão **só** no painel do Render — nenhum em arquivo versionado.
+
+Fora de escopo desta preparação: provisionar a conta Render/Neon, o primeiro deploy real, e a verificação empírica de `/health`/`SIGTERM` contra o ambiente real — isso é o restante de P5-01 e depende de acesso à conta, não de código.

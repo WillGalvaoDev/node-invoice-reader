@@ -19,7 +19,8 @@
 | **r9** | **P0-01 CONCLUÍDA (2026-08-28).** As sete decisões humanas restantes (D1–D7) tomadas pelo responsável do projeto e registradas em `docs/pilot-decisions.md`: máximo de 100 itens/DANFE (D1, destrava P4-01); retenção de `ai_call_events` em 60 dias (D2, destrava parte de P3-03); password management — troca **e** recuperação por e-mail — como Must have pré-piloto (D3, reclassifica P2-02, cria **P2-03** bloqueada pela escolha ainda não feita de provedor de e-mail); Gemini Free Tier no piloto sem budget USD arbitrário, Paid Tier comercial `DEFERRED_WITH_GATE` até valores explícitos (D4); teto de 200 usuários, não meta (D5); janela de 4 semanas (D6); `AuditLog` sem purga durante o piloto, prazo legal/comercial definitivo `DEFERRED_WITH_GATE` antes da comercialização, sem número inventado (D7). Duas tarefas novas de governança criadas a partir de investigação read-only de `AuditLog`: **P3-00A** (cobertura de auditoria de confirm/reject de sugestão, *Should have*) e **P3-00B** (barreira estrutural de payload do `AuditLog`, *Should have*, recomendada junto de P2-02). §14 reordenada. Nenhum código alterado nesta rodada — governança e documentação apenas. |
 | **r10** | **P3-00B implementada e commitada** (`09d4525`). Barreira estrutural do `AuditLog` em duas camadas: `AuditLogWrite` *branded* (só os builders de `use-cases/audit-events.ts` o produzem, então objeto literal não compila) e `assertAuditLogWrite` como rede de runtime, exercida pelo repositório Prisma **e** pelo dublê in-memory. Whitelist positiva de chaves **por evento**; `details` fora da escrita (coluna e leitura preservadas); `productAuditState` absorvido pelo builder. **`SENSITIVE_KEYS` do logger avaliada e descartada como fronteira primária** — comprovadamente deixa passar `currentPassword`/`newPassword`/`recoveryCode`, os nomes de P2-02/P2-03. Recusar, não mascarar; best-effort preservado. Suíte 336 → 388; Gate 33 → 37. Nenhuma migration. |
 | **r11** | **P2-02 implementada e commitada** (`133d89a`). `PATCH /me/password` com `authVersion Int @default(1)` (migration `20260828150000_add_user_auth_version`) comparado, não `passwordChangedAt`/`iat` — revogação por igualdade de inteiros, provada determinística sem avanço de relógio. `JoseTokenProvider.verifyToken` passa a validar tipo/presença da claim (único ponto de validação); `IUserRepository.updatePassword` grava hash e incrementa `authVersion` num único `UPDATE`, atomicidade provada sob concorrência real no gate. Novo evento de auditoria `USER:UPDATE` (`{ authVersion }`, sem material de senha), usando a barreira de P3-00B. Suíte 388 → 408; Gate 37 → 39. |
-| **r12** | **P4-01 implementada** (não commitada nesta rodada). `DANFE_MAX_ITEMS=100` (D1) como fonte única entre `responseSchema.maxItems` do prompt e `.max()` do Zod (`createDanfeResponseSchema`, virou fábrica para não acoplar o schema a `env` no módulo). Excesso de itens vira 422 com mensagem específica (distinta de "DANFE malformado"), detectado pelo `code: 'too_big'` do próprio Zod — abortando antes de qualquer chamada de similaridade. Suíte 408 → 418; Gate 39/39 (sem regressão, tarefa não toca persistência). |
+| **r12** | **P4-01 implementada e commitada** (`b0eee66`). `DANFE_MAX_ITEMS=100` (D1) como fonte única entre `responseSchema.maxItems` do prompt e `.max()` do Zod (`createDanfeResponseSchema`, virou fábrica para não acoplar o schema a `env` no módulo). Excesso de itens vira 422 com mensagem específica (distinta de "DANFE malformado"), detectado pelo `code: 'too_big'` do próprio Zod — abortando antes de qualquer chamada de similaridade. Suíte 408 → 418; Gate 39/39 (sem regressão, tarefa não toca persistência). |
+| **r13** | **P5-01 parcialmente preparada** (não commitada nesta rodada) — **não concluída**. `prisma.config.ts` desacoplado de `env.ts` (`resolveDatabaseUrl`, novo, `src/config/database-url.ts`): `prisma migrate`/`validate`/`generate` deixam de exigir `JWT_SECRET`/`GEMINI_API_KEY`, verificado na prática com as variáveis removidas do ambiente. Build/start commands e política expand/contract documentados no README. **Deploy real, `prisma migrate status` contra Neon e `/health`/`SIGTERM` contra Render seguem pendentes — exigem conta e credenciais reais, fora do alcance de execução autônoma.** Suíte 418 → 422. |
 
 ---
 
@@ -1383,6 +1384,16 @@ Independentemente do convite, adicionar **rate limit por usuário a `POST /compa
 
 ### P5-01 · Artefato de deploy e estratégia de migration
 
+**Status: PARCIALMENTE PREPARADA em 2026-08-28 — NÃO concluída.** A parte de código/config foi feita; a parte que só existe com conta real (deploy no Render, `/health`/`SIGTERM` contra o ambiente real) **não pode ser executada autonomamente** — exige credenciais e provisionamento de conta Render + Neon, fora do alcance de execução sem ação humana. Registrado como `HUMAN_DECISION_REQUIRED`: falta apenas a decisão/ação de provisionar a conta; nenhuma decisão técnica está pendente.
+
+**O que foi feito nesta rodada (sem deploy real):**
+- `prisma.config.ts` desacoplado de `src/config/env.ts` — passa a ler só `DATABASE_URL` via `resolveDatabaseUrl` (`src/config/database-url.ts`, novo), sem exigir `JWT_SECRET`/`GEMINI_API_KEY`. Verificado na prática (não só em teste): `env -u JWT_SECRET -u GEMINI_API_KEY DATABASE_URL=... npx prisma validate` roda com sucesso; sem `DATABASE_URL`, falha com a mesma mensagem clara de antes.
+- Build/start commands documentados no README (`## Deploy (Render + Neon)`): build `npm ci && npm run build && npx prisma migrate deploy`; start `npm start`.
+- Decisão "sem Dockerfile" registrada com a justificativa (runtime nativo já validado por `verify:production`).
+- Política expand/contract registrada como **obrigatória** (não recomendada), com a razão: migration roda no build, antes do tráfego novo, e não é desfeita por rollback.
+
+**O que continua faltando, e por que não avancei sozinho:** provisionar a conta Render + Neon (credenciais, criação de recursos), conectar `DATABASE_URL` real, executar o primeiro deploy, e verificar `/health`/`SIGTERM` contra o ambiente real. Nenhum desses passos é uma decisão técnica local — são ações em sistema externo que exigem acesso que este agente não tem e não deve obter sozinho.
+
 **Problema.** Não existe Dockerfile nem qualquer artefato de deploy. E três obstáculos concretos impedem que o deploy "óbvio" funcione: `prisma` é `devDependency` (some no `npm prune --omit=dev`, e com ela `prisma migrate deploy`); `prisma.config.ts` importa `src/config/env.js` e portanto exige `GEMINI_API_KEY` só para rodar migration; e `tsc` emite ao lado do fonte com os `.js` commitados, de modo que um deploy que não reconstrói pode subir artefato obsoleto **sem nenhum erro**.
 
 **Objetivo.** Um comando reprodutível que constrói e sobe a aplicação na plataforma escolhida, com migrations aplicadas de forma explícita e ordenada.
@@ -1411,13 +1422,13 @@ Forma esperada — build: `npm ci && npm run build && npx prisma migrate deploy`
 | **Impacto** | Sem isto não há piloto. |
 
 **Critérios de aceite.**
-1. Build reprodutível a partir de checkout limpo, com build e start commands documentados no repositório; **sem Dockerfile**, com a justificativa registrada.
-2. `prisma migrate deploy` roda no build command e é idempotente em base já migrada.
-3. `prisma migrate status` limpo contra o Neon após o deploy.
-4. O passo de migration **não exige `GEMINI_API_KEY`**.
-5. `DATABASE_URL` aponta para a string *pooled* do Neon com `sslmode=require`, e a aplicação conecta.
-6. A aplicação sobe, responde `/health` 200 e desliga com **exit 0** ao receber `SIGTERM` no ambiente real.
-7. **Política expand/contract registrada como obrigatória**, com a razão (migration no build não é revertida por rollback).
+1. [x] Build reprodutível a partir de checkout limpo, com build e start commands documentados no repositório; **sem Dockerfile**, com a justificativa registrada.
+2. [ ] `prisma migrate deploy` roda no build command e é idempotente em base já migrada. — comando é padrão e idempotente por design do Prisma; não verificado no build real do Render.
+3. [ ] `prisma migrate status` limpo contra o Neon após o deploy. — exige conta Neon real.
+4. [x] O passo de migration **não exige `GEMINI_API_KEY`** — verificado: `env -u JWT_SECRET -u GEMINI_API_KEY DATABASE_URL=... npx prisma validate` roda com sucesso.
+5. [ ] `DATABASE_URL` aponta para a string *pooled* do Neon com `sslmode=require`, e a aplicação conecta. — exige conta Neon real.
+6. [ ] A aplicação sobe, responde `/health` 200 e desliga com **exit 0** ao receber `SIGTERM` no ambiente real. — exige conta Render real.
+7. [x] **Política expand/contract registrada como obrigatória**, com a razão (migration no build não é revertida por rollback).
 
 **Testes esperados.** Execução do build no CI; boot do artefato contra Postgres efêmero com `/health` 200 e `SIGTERM` → exit 0 (extensão do `verify-production-runtime.mjs` existente); primeiro deploy real no Render como verificação de ponta a ponta.
 **Fora de escopo.** Múltiplas instâncias. Autoscaling. CDN. Blue/green. Pipeline de CD automático — o deploy do piloto pode ser manual e deliberado. Dockerfile.
@@ -2104,7 +2115,7 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | 8 | **P2-02** ✅ | Concluída e commitada. `authVersion` incrementado atomicamente na troca de senha; revogação determinística provada sem depender de avanço de relógio. Suíte 388 → 408; Gate 37 → 39. |
 | 9 | **P2-03** | **SKIPPED_BLOCKED — decisão humana ainda em aberto.** Depende de escolha de provedor de e-mail (não coberta por D1–D7). Não implementar até a escolha chegar; o restante da ordem **não espera** por ela — prossiga para P4-01 em paralelo e volte a P2-03 assim que a decisão chegar, antes de P6-01. |
 | 10 | **P4-01** ✅ | Concluída e commitada. `DANFE_MAX_ITEMS=100` (D1), fonte única no prompt e no schema; excesso vira 422 antes de qualquer chamada de similaridade. Suíte 408 → 418; Gate 39/39 (sem regressão). |
-| 11 | **P5-01** ← **próxima** | **Início do caminho crítico.** Antecipado em r2: é a primeira das três **M** encadeadas até P6-01, e a que mais atrasa o resto se escorregar. |
+| 11 | **P5-01** ⏸ **HUMAN_DECISION_REQUIRED** | **Parcialmente preparada em 2026-08-28** (código/config prontos: `prisma.config.ts` desacoplado, comandos documentados, política expand/contract registrada). **O restante exige conta Render + Neon real** — provisionamento e credenciais, não decisão técnica. Início do caminho crítico: P5-02, P5-03, P5-04 e P6-01 dependem da mesma conta. |
 | 12 | **P5-02** | Exige o ambiente de P5-01; consome o `JWT_SECRET` sob a regra de P2-01 |
 | 13 | **P5-04** | Exige ambiente e as rotas de P1; a partir daqui todo deploy é verificado |
 | 14 | **P5-03** | Exige o banco de produção; segunda **M** do caminho crítico |
