@@ -325,6 +325,63 @@ describe('PostgreSQL Integration Gate', () => {
         expect(Number(persisted.quantity)).toBe(15);
         expect(Number(persisted.unitPrice)).toBe(10);
     });
+    it('P3-02: view ai_suggestion_events correlaciona created/confirmed/rejected por correlationId, confidence bruta, e responde taxa de aceitação por faixa calculada na consulta', async () => {
+        const { owner, stock } = await seedOwnerAndStock();
+        const productA = await prisma.product.create({ data: product(stock.id, 'VIEW-A', 10) });
+        const productB = await prisma.product.create({ data: product(stock.id, 'VIEW-B', 10) });
+        const productC = await prisma.product.create({ data: product(stock.id, 'VIEW-C', 10) });
+        const invoice = await prisma.processedInvoice.create({
+            data: { accessKey: `p3-02-${crypto.randomUUID()}`, stockId: stock.id, correlationId: 'corr-p3-02' },
+        });
+        const pendingSuggestion = await prisma.productSimilaritySuggestion.create({
+            data: {
+                processedInvoiceId: invoice.id, itemIndex: 0, stockId: stock.id, suggestedProductId: productA.id,
+                receivedCode: 'VIEW-PENDING', receivedDescription: 'Produto pendente', receivedQuantity: 1, receivedUnitPrice: 1,
+                unitMeasurement: 'UN', confidence: 0.6, reason: 'baixa confiança',
+            },
+        });
+        const confirmedSuggestion = await prisma.productSimilaritySuggestion.create({
+            data: {
+                processedInvoiceId: invoice.id, itemIndex: 1, stockId: stock.id, suggestedProductId: productB.id,
+                receivedCode: 'VIEW-CONFIRMED', receivedDescription: 'Produto confirmado', receivedQuantity: 1, receivedUnitPrice: 1,
+                unitMeasurement: 'UN', confidence: 0.9123, reason: 'alta confiança',
+                status: 'CONFIRMED', decidedAt: new Date(), decidedByUserId: owner.id,
+            },
+        });
+        const rejectedSuggestion = await prisma.productSimilaritySuggestion.create({
+            data: {
+                processedInvoiceId: invoice.id, itemIndex: 2, stockId: stock.id, suggestedProductId: productC.id,
+                receivedCode: 'VIEW-REJECTED', receivedDescription: 'Produto rejeitado', receivedQuantity: 1, receivedUnitPrice: 1,
+                unitMeasurement: 'UN', confidence: 0.91, reason: 'alta confiança, rejeitado',
+                status: 'REJECTED', decidedAt: new Date(), decidedByUserId: owner.id,
+            },
+        });
+        const events = await prisma.$queryRaw `
+      SELECT * FROM "ai_suggestion_events" WHERE "suggestionId" IN (${pendingSuggestion.id}, ${confirmedSuggestion.id}, ${rejectedSuggestion.id})
+    `;
+        expect(events).toHaveLength(5); // 1 created (pending) + 2 created + 2 decididos
+        expect(events.every((event) => event.correlationId === 'corr-p3-02')).toBe(true);
+        expect(events.every((event) => event.companyId === stock.companyId)).toBe(true);
+        expect(events.filter((event) => event.decision === 'created')).toHaveLength(3);
+        expect(events.filter((event) => event.decision === 'confirmed')).toHaveLength(1);
+        expect(events.filter((event) => event.decision === 'rejected')).toHaveLength(1);
+        const confirmedEvent = events.find((event) => event.decision === 'confirmed');
+        expect(confirmedEvent?.confidence.toString()).toBe('0.9123'); // bruta, não em bucket
+        expect(confirmedEvent?.decidedByUserId).toBe(owner.id);
+        const createdOnlyEvent = events.find((event) => event.suggestionId === pendingSuggestion.id);
+        expect(createdOnlyEvent?.decidedByUserId).toBeNull();
+        const acceptance = await prisma.$queryRaw `
+      SELECT
+        CASE WHEN confidence < 0.85 THEN '0.00-0.84' ELSE '0.85-1.00' END AS confidence_band,
+        COUNT(*) FILTER (WHERE decision = 'confirmed') AS confirmed,
+        COUNT(*) FILTER (WHERE decision = 'rejected') AS rejected
+      FROM "ai_suggestion_events"
+      WHERE "suggestionId" IN (${pendingSuggestion.id}, ${confirmedSuggestion.id}, ${rejectedSuggestion.id})
+        AND decision IN ('confirmed', 'rejected')
+      GROUP BY confidence_band ORDER BY confidence_band
+    `;
+        expect(acceptance).toEqual([{ confidence_band: '0.85-1.00', confirmed: 1n, rejected: 1n }]);
+    });
     it('rejeita PENDING, preserva candidato e cadastra snapshot como novo produto', async () => {
         const { owner, stock } = await seedOwnerAndStock();
         const candidate = await prisma.product.create({ data: product(stock.id, 'REJECT-CANDIDATE', 10, { unitPrice: 5, totalPrice: 50 }) });

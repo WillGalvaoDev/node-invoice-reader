@@ -24,6 +24,7 @@
 | **r14** | **P4-02 avaliada e classificada `HUMAN_DECISION_REQUIRED`** — nenhum código escrito. Ao revisar o design antes de implementar, confirmou-se que a própria tarefa já exigia ler limites reais de cota no Google AI Studio para calibrar os tetos internos do Modo A ("Não fixei número" já estava registrado) — acesso a conta externa, mesma classe de bloqueio de P5-01. **P4-03 implementada** (não commitada nesta rodada). Código de convite compartilhado via `INVITE_CODE`, comparado por `timingSafeEqual` sobre digests SHA-256 (evita a exigência de mesmo comprimento do `timingSafeEqual` cru); ausência e código incorreto convergem no mesmo `403`. Rate limit por usuário em `POST /companies`. **Achado corrigido:** CI/scripts não definiam `INVITE_CODE` — mascarado localmente pelo `.env` via dotenv; confirmado ocultando o `.env` temporariamente e corrigido nos dois jobs do CI e nos dois scripts de runtime. Suíte 422 → 432; Gate 39/39. |
 | **r15** | **P3-01 implementada e commitada.** Nova tabela `ai_call_events` (migration `20260902120000_add_ai_call_events`, aditiva: tabela nova + `ProcessedInvoice.correlationId` nullable). `correlationId` (UUID) gerado no servidor em `ReadInvoiceUseCase.execute`, nunca aceito do cliente — propagado a `extractDanfeData`/`findSimilarProduct` via `IAiCallContext` e à persistência da nota na mesma transação. Nova `PrismaAiTelemetry` (implementa `IAiTelemetry`) persiste cada chamada real ao Gemini, mantendo o log estruturado como canal secundário; `estimatedCostUsdNanos` substitui `costUsdNanos` no tipo do evento (estimado, nunca faturado — D4). `userId`/`companyId`/`stockId` vão para a tabela mas são **excluídos** do canal de log (whitelist positiva, mesmo princípio de P3-00B). Escrita best-effort e fora da transação de domínio, provada com falha síncrona e assíncrona do recorder. Nenhum caminho de código lê `ai_call_events` para autorizar chamada de IA (verificado por grep, critério de aceite 7). Sem FK para User/Company/Stock (decisão deliberada: tabela best-effort de alto volume, sem consulta desta tarefa via relação Prisma). Suíte 432 → 441; Gate 39 → 41. |
 | **r16** | **P3-00A implementada e commitada.** `ConfirmProductSuggestionUseCase`/`RejectProductSuggestionUseCase` passam a auditar a alteração real do produto (`auditEvents.productSuggestionDecided`, novo builder — mesma forma de `productEntry`, descrição própria, não "processado por invoice"). `IProductSuggestionRepository.confirm`/`.reject` passam a devolver `{ suggestion, productId, previousProduct, nextProduct }` (a transação já tinha o antes/depois; só não saía dela) — contrato HTTP de `/suggestions/:id/confirm`|`/reject` **inalterado**, o use case continua devolvendo só `suggestion`. `authorizeProductSuggestion` passa a devolver também `companyId` (valor já resolvido e antes descartado). Sem migration — `PRODUCT:CREATE`/`PRODUCT:UPDATE` já estavam na whitelist de P3-00B. Provado com dado real no gate (audit log real após confirm/reject via Prisma, não só dublê). Suíte 441 → 445; Gate 41/41 (sem regressão). |
+| **r17** | **P3-02 implementada e commitada — como VIEW, não tabela.** Critério de aceite 1 (avaliar view × tabela) resolveu a favor da view: todo o dado (`confidence` bruta, `status`, `decidedAt`, `decidedByUserId`, `stockId`) já existe em `product_similarity_suggestions`, e `correlationId` já chega via `ProcessedInvoice` (P3-01). `ai_suggestion_events` (migration `20260902130000_add_ai_suggestion_events_view`) expande cada sugestão em um evento `created` e, se decidida, um segundo `confirmed`/`rejected`, via `UNION ALL`. Sem escrita própria — o critério "falha de registro não reverte a decisão" fica automaticamente satisfeito, por não existir registro separado. `confidenceBucket` nunca persistido — bucket calculado na consulta, provado com uma agregação real de taxa de aceitação por faixa no gate. Nenhum código de aplicação alterado (nenhuma tabela, nenhum repositório, nenhuma mudança em `IAiTelemetry`). Suíte inalterada (445/445, mudança é só SQL); Gate 41 → 42. |
 
 ---
 
@@ -1042,6 +1043,8 @@ Isso é relevante especificamente porque confirmar/rejeitar uma sugestão de IA 
 
 ### P3-02 · Persistir decisões de sugestão de forma correlacionável
 
+**Status: CONCLUÍDA em 2026-09-02 — como VIEW, não tabela nova (ver critério de aceite 1).**
+
 **Problema.** `recordSuggestion` emite `{ decision, confidenceBucket }` e nada mais. Não há `requestId`, `suggestionId`, `stockId` nem confidence bruta. É impossível ligar uma decisão humana à nota que a originou ou à chamada de IA que a produziu — e o bucket fixo na emissão impede qualquer recalibração posterior de faixa, que é exatamente o que as bandas de M6-02 exigiriam.
 
 **Objetivo.** Cada evento de sugestão (`created`/`confirmed`/`rejected`) fica registrado com confidence bruta e chaves de correlação suficientes para cruzar aceitação × confiança × custo.
@@ -1058,16 +1061,23 @@ Isso é relevante especificamente porque confirmar/rejeitar uma sugestão de IA 
 | **Prioridade** | **P1** |
 | **Impacto** | É a única fonte possível para as bandas de decisão de M6-02 e para medir qualidade de matching. |
 
-**Critérios de aceite.**
-1. A alternativa "view em vez de tabela" foi avaliada e a escolha está registrada com justificativa.
-2. Confidence é persistida **bruta**, não em bucket.
-3. Toda sugestão criada, confirmada ou rejeitada produz registro correlacionável ao estoque e (para as criadas) à nota.
-4. Falha de registro não altera o resultado de confirmar/rejeitar (best-effort preservado).
-5. É possível responder, por SQL, "taxa de aceitação por faixa de confiança" com as faixas definidas **na consulta**.
+**Critérios de aceite — todos cumpridos.**
+1. ✅ **A alternativa "view em vez de tabela" foi avaliada e escolhida, com justificativa registrada abaixo.** Não é uma nota lateral — é o resultado real da tarefa.
+2. ✅ Confidence é lida **bruta** (`Decimal(5,4)` de `product_similarity_suggestions.confidence`, sem arredondamento nem bucket) — na verdade nem chega a ser "persistida" de novo: a view lê a única cópia que existe, eliminando por construção qualquer risco de ela divergir de um valor duplicado.
+3. ✅ Toda sugestão criada produz um evento `created` (join com `processed_invoices` para o `correlationId` da nota); toda sugestão confirmada/rejeitada produz também um segundo evento (`confirmed`/`rejected`), com `stockId`/`companyId` em ambos.
+4. ✅ **Falha de registro não altera o resultado de confirmar/rejeitar — automaticamente, por construção.** Não há escrita própria para falhar: a view lê exatamente o estado que a transação de `confirm`/`reject` (P3-00A) já grava com garantia transacional. O critério best-effort de P3-01 não se aplica aqui pela mesma razão que não se aplica a uma consulta `SELECT` sobre `AuditLog`.
+5. ✅ É possível responder "taxa de aceitação por faixa de confiança", com as faixas definidas **na consulta** (`CASE WHEN confidence < ... THEN ...`), nunca na emissão — provado no gate com uma agregação real (`COUNT(*) FILTER (WHERE decision = ...)` agrupado por faixa).
 
-**Testes esperados.** Unitário para os três tipos de decisão; unitário provando que falha de telemetria não reverte a decisão; gate PostgreSQL com uma consulta de agregação real por faixa.
+**Decisão registrada: view, não tabela.** As três razões, em ordem de peso:
+1. **Todo o dado já existe, sob um contrato de escrita mais forte do que o de qualquer tabela de evento poderia ter.** `product_similarity_suggestions.status`/`decidedAt`/`decidedByUserId`/`confidence` são gravados na mesma transação Postgres que atualiza o produto (P3-00A) — a garantia mais forte disponível no sistema. Uma tabela `ai_suggestion_events` best-effort seria uma SEGUNDA cópia desse mesmo dado sob um contrato mais fraco, reproduzindo exatamente o padrão de risco que a separação ledger/eventos (P3-01/P4-02) já existe para evitar: duas fontes da mesma verdade, sujeitas a divergir em silêncio.
+2. **O `correlationId`, a única peça que faltava, já existe fora desta tarefa.** P3-01 já adicionou `ProcessedInvoice.correlationId`; a view só precisa de um `JOIN`, não de propagação nova.
+3. **Uma view elimina inteiramente a superfície de falha que uma tabela nova introduziria.** Sem escrita própria, não há best-effort para errar, não há retry, não há linha perdida — o critério de aceite 4 deixa de ser algo a implementar e passa a ser uma consequência estrutural.
 
-**Fora de escopo.** Definir as bandas de M6-02. Alterar o limiar. Endpoint HTTP.
+**Migration:** `20260902130000_add_ai_suggestion_events_view` — `CREATE VIEW "ai_suggestion_events"` (`UNION ALL` de dois `SELECT`s: todo registro gera `created` a partir de `createdAt`; `status IN (CONFIRMED, REJECTED)` gera um segundo evento a partir de `decidedAt`). Aditiva, sem tocar dado existente. Nenhuma FK/índice novo necessário — a view lê índices já existentes (`product_similarity_suggestions(stockId, status)`, PKs de `processed_invoices`/`stocks`).
+
+**Testes.** Gate PostgreSQL: 3 sugestões semeadas (`PENDING`, `CONFIRMED`, `REJECTED`) produzem exatamente 5 linhas na view (3 `created` + 2 decididas); `correlationId` da nota presente em todas; `confidence` bruta (`'0.9123'`, não bucket); agregação de aceitação por faixa definida na consulta devolve o resultado esperado. Nenhum teste unitário novo — não há código de aplicação para testar (nenhuma tabela, nenhum repositório, `IAiTelemetry` inalterada).
+
+**Fora de escopo (respeitado).** Definir as bandas de M6-02 (a query do gate usa uma faixa de exemplo, não a definitiva). Alterar o limiar de similaridade. Endpoint HTTP. O runbook formal de consultas nomeadas — isso é P3-03.
 
 ---
 
@@ -2152,8 +2162,8 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | 16 | **P4-03** ✅ | Concluída, pendente de commit desta rodada. Fecha o contorno do teto por usuário. Suíte 422 → 432; Gate 39/39 (sem regressão). |
 | 17 | **P3-01** ✅ | Concluída e commitada. `ai_call_events` + `correlationId` gerado no servidor, propagado a extração/similaridade/persistência. `PrismaAiTelemetry` best-effort, log estruturado preservado sem `userId`/`companyId`/`stockId`. Suíte 432 → 441; Gate 39 → 41 (sem regressão). |
 | 18 | **P3-00A** ✅ | Concluída e commitada. `confirm`/`reject` de sugestão passam a auditar a alteração real de produto (`productSuggestionDecided`, builder novo). Sem migration. Suíte 441 → 445; Gate 41/41 (sem regressão). |
-| 19 | **P3-02** ← **próxima** | Depende de P3-01 (`correlationId`, já disponível); barata logo em seguida |
-| 20 | **P3-03** | Consultas com o dado já modelado; insumo dos runbooks. Retenção de `ai_call_events` já decidida (D2: 60 dias). |
+| 19 | **P3-02** ✅ | Concluída e commitada. Como **view** (`ai_suggestion_events`), não tabela — critério de aceite 1 exigia essa avaliação, e ela decidiu contra a tabela. Suíte 445/445 (inalterada); Gate 41 → 42. |
+| 20 | **P3-03** ← **próxima** | Consultas com o dado já modelado; insumo dos runbooks. Retenção de `ai_call_events` já decidida (D2: 60 dias). |
 | 21 | **P3-04** | Exige as duas fontes; precisa existir antes da janela |
 | 22 | **P5-05** | Referencia quase tudo, inclusive P3-04 e P0-02; escrever por último evita reescrever |
 | 23 | **P6-01** | Portão de entrada do piloto. **Exige P2-02 e P2-03 concluídas** (Must have, D3) — se P2-03 seguir bloqueada pela escolha de provedor de e-mail nesta altura, **P6-01 não pode começar**. Coorte até 200 (D5, teto não meta). |
