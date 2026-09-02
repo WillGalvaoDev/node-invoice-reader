@@ -50,11 +50,24 @@ export type ISimilarityResult =
   | { kind: 'no_match' }
   | { kind: 'unavailable'; reason: SimilarityUnavailableReason };
 
+/**
+ * Contexto de uma chamada de IA. `correlationId` é o identificador de correlação
+ * gerado no servidor (P3-01) — nunca aceito do cliente. `requestId` é o do
+ * cliente, guardado só para cruzar com log, nunca como chave de correlação.
+ */
+export interface IAiCallContext {
+  requestId?: string;
+  correlationId?: string;
+  userId?: string;
+  companyId?: string;
+  stockId?: string;
+}
+
 export interface IAiProvider {
-  extractDanfeData(content: Buffer, mimeType: DanfeMimeType, context?: { requestId?: string }): Promise<IDanfeExtractResult>;
+  extractDanfeData(content: Buffer, mimeType: DanfeMimeType, context?: IAiCallContext): Promise<IDanfeExtractResult>;
   findSimilarProduct(
     newItemDescription: string,
     existingProducts: IProduct[],
-    context?: { requestId?: string },
+    context?: IAiCallContext,
   ): Promise<ISimilarityResult>;
 }

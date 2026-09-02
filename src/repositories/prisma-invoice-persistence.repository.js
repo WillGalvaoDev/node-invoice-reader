@@ -4,13 +4,13 @@ import { AppError } from '../errors/app-error.js';
 import { upsertWeightedProductEntry } from './prisma-weighted-product-entry.js';
 import { isPrismaErrorCode } from '../errors/prisma-error.js';
 export class PrismaInvoicePersistenceRepository {
-    async persist({ accessKey, stockId, operations, suggestions = [] }) {
+    async persist({ accessKey, stockId, operations, suggestions = [], correlationId }) {
         return prisma.$transaction(async (transaction) => {
             const products = [];
             let processedInvoiceId;
             try {
                 const processedInvoice = await transaction.processedInvoice.create({
-                    data: { accessKey, stockId },
+                    data: { accessKey, stockId, ...(correlationId !== undefined && { correlationId }) },
                 });
                 processedInvoiceId = processedInvoice.id;
             }

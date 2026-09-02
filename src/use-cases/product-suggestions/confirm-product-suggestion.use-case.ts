@@ -15,7 +15,7 @@ export class ConfirmProductSuggestionUseCase {
   async execute({ suggestionId, userId }: { suggestionId: string; userId: string }) {
     await authorizeProductSuggestion(suggestionId, userId, this.suggestions, this.stocks);
     const confirmed = await this.suggestions.confirm(suggestionId, userId);
-    recordAiTelemetryBestEffort(
+    await recordAiTelemetryBestEffort(
       () => this.telemetry.recordSuggestion({ decision: 'confirmed', confidence: confirmed.confidence }),
       this.applicationLogger,
       { event: 'ai_suggestion', decision: 'confirmed' },

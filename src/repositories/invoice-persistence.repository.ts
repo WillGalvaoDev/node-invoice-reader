@@ -22,6 +22,8 @@ export interface IInvoicePersistencePlan {
   stockId: string;
   operations: IInvoiceProductOperation[];
   suggestions?: IInvoiceSuggestionOperation[];
+  // P3-01: liga a nota ao custo/telemetria em ai_call_events, nunca em log.
+  correlationId?: string;
 }
 
 export interface IInvoicePersistenceRepository {

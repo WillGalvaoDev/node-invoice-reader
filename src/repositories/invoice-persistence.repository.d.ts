@@ -19,6 +19,7 @@ export interface IInvoicePersistencePlan {
     stockId: string;
     operations: IInvoiceProductOperation[];
     suggestions?: IInvoiceSuggestionOperation[];
+    correlationId?: string;
 }
 export interface IInvoicePersistenceRepository {
     persist(plan: IInvoicePersistencePlan): Promise<IProduct[]>;

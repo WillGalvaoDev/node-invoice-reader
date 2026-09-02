@@ -41,7 +41,7 @@ describe('GeminiAiProvider telemetry', () => {
     expect(recordCall).toHaveBeenCalledWith({
       requestId: 'request-123', operation: 'invoice_extraction', model: 'gemini-2.5-flash', modelVersion: 'gemini-2.5-flash-001', status: 'success',
       durationMs: 15, attempts: 1, inputTokens: 100, outputTokens: 25,
-      totalTokens: 125, costUsdNanos: 92_500,
+      totalTokens: 125, estimatedCostUsdNanos: 92_500,
     });
   });
 
@@ -50,7 +50,7 @@ describe('GeminiAiProvider telemetry', () => {
     const now = vi.fn().mockReturnValueOnce(1).mockReturnValueOnce(2);
     await new GeminiAiProvider({ telemetry, monotonicNow: now }).extractDanfeData(fileContent, 'image/png');
     expect(recordCall).toHaveBeenCalledWith(expect.not.objectContaining({ inputTokens: expect.anything() }));
-    expect(recordCall).toHaveBeenCalledWith(expect.not.objectContaining({ costUsdNanos: expect.anything() }));
+    expect(recordCall).toHaveBeenCalledWith(expect.not.objectContaining({ estimatedCostUsdNanos: expect.anything() }));
   });
 
   it('registra falha final e número de tentativas sem mudar retry', async () => {
@@ -94,5 +94,23 @@ describe('GeminiAiProvider telemetry', () => {
     recordCall.mockImplementationOnce(() => { throw new Error('telemetry unavailable'); });
     await expect(new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData(fileContent, 'image/png'))
       .resolves.toMatchObject({ accessKey: validDanfe.accessKey });
+  });
+
+  it('falha assíncrona (Promise) da telemetria também não altera o resultado (P3-01: escrita agora é uma chamada ao banco)', async () => {
+    generateContent.mockResolvedValue({ text: JSON.stringify(validDanfe) });
+    recordCall.mockImplementationOnce(() => Promise.reject(new Error('telemetry db unavailable')));
+    await expect(new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData(fileContent, 'image/png'))
+      .resolves.toMatchObject({ accessKey: validDanfe.accessKey });
+  });
+
+  it('propaga correlationId do contexto para o evento, e nunca o inventa quando ausente (P3-01)', async () => {
+    generateContent.mockResolvedValue({ text: JSON.stringify(validDanfe) });
+    await new GeminiAiProvider({ telemetry, monotonicNow: () => 1 })
+      .extractDanfeData(fileContent, 'image/png', { correlationId: 'corr-abc' });
+    expect(recordCall).toHaveBeenCalledWith(expect.objectContaining({ correlationId: 'corr-abc' }));
+
+    recordCall.mockClear();
+    await new GeminiAiProvider({ telemetry, monotonicNow: () => 1 }).extractDanfeData(fileContent, 'image/png');
+    expect(recordCall).toHaveBeenCalledWith(expect.not.objectContaining({ correlationId: expect.anything() }));
   });
 });

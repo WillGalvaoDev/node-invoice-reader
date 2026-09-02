@@ -5,6 +5,7 @@ export type SuggestionTelemetryDecision = 'created' | 'confirmed' | 'rejected';
 export type ConfidenceBucket = '0.00-0.49' | '0.50-0.69' | '0.70-0.84' | '0.85-0.94' | '0.95-1.00';
 export interface AiCallTelemetryEvent {
     requestId?: string;
+    correlationId?: string;
     operation: AiOperation;
     model: string;
     modelVersion?: string;
@@ -14,15 +15,18 @@ export interface AiCallTelemetryEvent {
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
-    costUsdNanos?: number;
+    estimatedCostUsdNanos?: number;
     failureCategory?: AiFailureCategory;
+    userId?: string;
+    companyId?: string;
+    stockId?: string;
 }
 export interface AiSuggestionTelemetryEvent {
     decision: SuggestionTelemetryDecision;
     confidence: number;
 }
 export interface IAiTelemetry {
-    recordCall(event: AiCallTelemetryEvent): void;
+    recordCall(event: AiCallTelemetryEvent): void | Promise<void>;
     recordSuggestion(event: AiSuggestionTelemetryEvent): void;
 }
 export declare function calculateGeminiCostUsdNanos(model: string, inputTokens: number, outputTokens: number): number | undefined;
@@ -31,5 +35,5 @@ export declare function createAiTelemetry({ logger: applicationLogger }?: {
     logger?: Logger;
 }): IAiTelemetry;
 export declare const aiTelemetry: IAiTelemetry;
-export declare function recordAiTelemetryBestEffort(record: () => void, applicationLogger: Logger, context: Record<string, unknown>): void;
+export declare function recordAiTelemetryBestEffort(record: () => void | Promise<void>, applicationLogger: Logger, context: Record<string, unknown>): Promise<void>;
 //# sourceMappingURL=ai-telemetry.d.ts.map

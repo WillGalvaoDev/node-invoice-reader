@@ -23,19 +23,23 @@ describe('AI telemetry', () => {
         const telemetry = createAiTelemetry({
             logger: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
         });
-        telemetry.recordCall({
+        void telemetry.recordCall({
             operation: 'invoice_extraction', model: 'gemini-2.5-flash', status: 'success',
             durationMs: 12.5, attempts: 1, inputTokens: 100, outputTokens: 20,
-            totalTokens: 120, costUsdNanos: 80_000,
+            totalTokens: 120, estimatedCostUsdNanos: 80_000,
+            correlationId: 'corr-1', userId: 'u1', companyId: 'c1', stockId: 's1',
         });
         telemetry.recordSuggestion({ decision: 'created', confidence: 0.88 });
         expect(info).toHaveBeenNthCalledWith(1, 'AI operation observed', expect.objectContaining({
             event: 'ai_operation', operation: 'invoice_extraction', status: 'success', inputTokens: 100,
+            correlationId: 'corr-1',
         }));
         expect(info).toHaveBeenNthCalledWith(2, 'AI suggestion observed', {
             event: 'ai_suggestion', decision: 'created', confidenceBucket: '0.85-0.94',
         });
         const serialized = JSON.stringify(info.mock.calls);
+        // userId/companyId/stockId existem no evento (linha acima) mas nunca podem chegar ao
+        // log estruturado (P3-01): só ai_call_events, sob as mesmas regras de acesso do banco.
         expect(serialized).not.toMatch(/accessKey|cnpj|description|prompt|response|userId|companyId|stockId/i);
     });
     it('keeps best-effort when recorder and logger both fail', () => {

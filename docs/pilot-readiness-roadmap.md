@@ -22,6 +22,7 @@
 | **r12** | **P4-01 implementada e commitada** (`b0eee66`). `DANFE_MAX_ITEMS=100` (D1) como fonte única entre `responseSchema.maxItems` do prompt e `.max()` do Zod (`createDanfeResponseSchema`, virou fábrica para não acoplar o schema a `env` no módulo). Excesso de itens vira 422 com mensagem específica (distinta de "DANFE malformado"), detectado pelo `code: 'too_big'` do próprio Zod — abortando antes de qualquer chamada de similaridade. Suíte 408 → 418; Gate 39/39 (sem regressão, tarefa não toca persistência). |
 | **r13** | **P5-01 parcialmente preparada e commitada** (`08f49bc`) — **não concluída**. `prisma.config.ts` desacoplado de `env.ts` (`resolveDatabaseUrl`, novo, `src/config/database-url.ts`): `prisma migrate`/`validate`/`generate` deixam de exigir `JWT_SECRET`/`GEMINI_API_KEY`, verificado na prática com as variáveis removidas do ambiente. Build/start commands e política expand/contract documentados no README. **Deploy real, `prisma migrate status` contra Neon e `/health`/`SIGTERM` contra Render seguem pendentes — exigem conta e credenciais reais, fora do alcance de execução autônoma.** Suíte 418 → 422. |
 | **r14** | **P4-02 avaliada e classificada `HUMAN_DECISION_REQUIRED`** — nenhum código escrito. Ao revisar o design antes de implementar, confirmou-se que a própria tarefa já exigia ler limites reais de cota no Google AI Studio para calibrar os tetos internos do Modo A ("Não fixei número" já estava registrado) — acesso a conta externa, mesma classe de bloqueio de P5-01. **P4-03 implementada** (não commitada nesta rodada). Código de convite compartilhado via `INVITE_CODE`, comparado por `timingSafeEqual` sobre digests SHA-256 (evita a exigência de mesmo comprimento do `timingSafeEqual` cru); ausência e código incorreto convergem no mesmo `403`. Rate limit por usuário em `POST /companies`. **Achado corrigido:** CI/scripts não definiam `INVITE_CODE` — mascarado localmente pelo `.env` via dotenv; confirmado ocultando o `.env` temporariamente e corrigido nos dois jobs do CI e nos dois scripts de runtime. Suíte 422 → 432; Gate 39/39. |
+| **r15** | **P3-01 implementada e commitada.** Nova tabela `ai_call_events` (migration `20260902120000_add_ai_call_events`, aditiva: tabela nova + `ProcessedInvoice.correlationId` nullable). `correlationId` (UUID) gerado no servidor em `ReadInvoiceUseCase.execute`, nunca aceito do cliente — propagado a `extractDanfeData`/`findSimilarProduct` via `IAiCallContext` e à persistência da nota na mesma transação. Nova `PrismaAiTelemetry` (implementa `IAiTelemetry`) persiste cada chamada real ao Gemini, mantendo o log estruturado como canal secundário; `estimatedCostUsdNanos` substitui `costUsdNanos` no tipo do evento (estimado, nunca faturado — D4). `userId`/`companyId`/`stockId` vão para a tabela mas são **excluídos** do canal de log (whitelist positiva, mesmo princípio de P3-00B). Escrita best-effort e fora da transação de domínio, provada com falha síncrona e assíncrona do recorder. Nenhum caminho de código lê `ai_call_events` para autorizar chamada de IA (verificado por grep, critério de aceite 7). Sem FK para User/Company/Stock (decisão deliberada: tabela best-effort de alto volume, sem consulta desta tarefa via relação Prisma). Suíte 432 → 441; Gate 39 → 41. |
 
 ---
 
@@ -985,6 +986,8 @@ Isso é relevante especificamente porque confirmar/rejeitar uma sugestão de IA 
 
 ### P3-01 · Persistir eventos de chamada de IA com correlação gerada no servidor
 
+**Status: CONCLUÍDA em 2026-09-02.**
+
 **Problema.** `IAiTelemetry.recordCall` escreve uma linha JSON em stdout e nada mais. Sem retenção, sem consulta, sem agregação. Toda pergunta que o piloto existe para responder é, hoje, inrespondível. E a única chave de correlação disponível (`requestId`) **é aceita do cliente** (`request-id.ts:8`): um cliente que envie sempre o mesmo `X-Request-Id` colapsa toda a correlação de custo e de chamadas-por-nota.
 
 **Objetivo.** Toda chamada ao Gemini produz uma linha consultável em PostgreSQL, correlacionável por nota através de um identificador que o cliente não controla.
@@ -1009,18 +1012,25 @@ Isso é relevante especificamente porque confirmar/rejeitar uma sugestão de IA 
 | **Prioridade** | **P0** |
 | **Impacto** | Transforma o piloto de "usar o sistema" em "medir o sistema". Sem isto, o piloto roda e não produz nada. |
 
-**Critérios de aceite.**
-1. Um upload bem-sucedido grava exatamente uma linha `invoice_extraction` e uma linha `product_similarity` por chamada realmente feita, todas com o mesmo `correlationId`.
-2. Chamada que falha também grava linha, com `status='failure'` e `failureCategory` preenchido.
-3. Falha de escrita da telemetria **não** falha o upload e **não** reverte a nota — teste explícito com a escrita rejeitando.
-4. `correlationId` é gerado no servidor; enviar um `X-Request-Id` fixo em N uploads produz N `correlationId` distintos.
-5. Nenhuma coluna contém conteúdo de documento, descrição de produto ou `accessKey`.
-6. Migration aditiva (tabela nova + coluna nullable em `processed_invoices`).
-7. **Nenhum caminho de código lê `ai_call_events` para decidir se uma chamada de IA pode acontecer** — a verificação é de revisão, e a ausência dessa leitura é o critério.
+**Critérios de aceite — todos cumpridos.**
+1. ✅ Um upload bem-sucedido grava exatamente uma linha `invoice_extraction` e uma linha `product_similarity` por chamada realmente feita, todas com o mesmo `correlationId` — provado em unitário (`read-invoice.use-case.spec.ts`) e no gate real (Postgres).
+2. ✅ Chamada que falha também grava linha, com `status='failure'` e `failureCategory` preenchido — comportamento preservado de `GeminiAiProvider.recordCall`, agora persistido.
+3. ✅ Falha de escrita da telemetria **não** falha o upload e **não** reverte a nota — provado com o recorder rejeitando de forma síncrona e assíncrona (`prisma-ai-telemetry.spec.ts`, `gemini-ai.telemetry.spec.ts`).
+4. ✅ `correlationId` é gerado no servidor (`randomUUID()` em `ReadInvoiceUseCase.execute`); um `X-Request-Id` fixo em N uploads produz N `correlationId` distintos — teste explícito.
+5. ✅ Nenhuma coluna contém conteúdo de documento, descrição de produto ou `accessKey` — provado no gate real serializando as linhas persistidas.
+6. ✅ Migration aditiva (tabela nova + coluna nullable em `processed_invoices`) — `20260902120000_add_ai_call_events`.
+7. ✅ **Nenhum caminho de código lê `ai_call_events` para decidir se uma chamada de IA pode acontecer** — verificado por grep: o único `findMany` do projeto sobre a tabela é a asserção do próprio teste de gate.
 
-**Testes esperados.** Unitário de `PrismaAiTelemetry` (mapeamento de campos, opcionais ausentes); unitário do use case provando um `correlationId` por nota compartilhado por todas as chamadas; unitário provando que falha de telemetria não propaga; gate PostgreSQL escrevendo e lendo eventos reais e verificando os índices via `pg_indexes`.
+**Decisões de implementação registradas:**
+- `estimatedCostUsdNanos` (não `costUsdNanos`) no tipo do evento — mesma renomeação já decidida acima, agora também no código, não só no schema.
+- `userId`/`companyId`/`stockId` entram na tabela mas são **excluídos** do canal de log estruturado por whitelist positiva (`toLoggableCallEvent`, `src/infra/ai-telemetry.ts`) — mesmo princípio de P3-00B aplicado a uma segunda dimensão sensível (identificador de tenant, não credencial).
+- `operation`/`status`/`failureCategory` persistidos como `String` (não enum Prisma): tabela best-effort e de alto volume, cujo objetivo é nunca bloquear a operação de negócio; um enum divergente entre app/migration transformaria um evento não crítico em erro de `INSERT`. Trade-off documentado, não silencioso.
+- **Sem FK para `User`/`Company`/`Stock`**: tabela de alto volume, best-effort, deliberadamente desacoplada do ciclo de vida dessas entidades — nenhuma consulta desta tarefa navega a relação via Prisma, e a reconciliação futura (P3-04) é esperada por `correlationId`/agregação, não por join relacional.
+- `PrismaAiTelemetry.recordCall` recusa persistir (lança) quando `correlationId` está ausente, em vez de gravar um placeholder — "recusar, não mascarar", mesmo princípio de P3-00B; a recusa é absorvida pelo best-effort do call site, nunca propaga.
 
-**Fora de escopo.** Dashboard. Exportação. Endpoint HTTP de telemetria. Retenção (P3-03). Qualquer decisão sobre batching (M5-02).
+**Testes esperados — implementados.** Unitário de `PrismaAiTelemetry` (mapeamento de campos, opcionais ausentes, recusa sem `correlationId`, best-effort síncrono/assíncrono, `recordSuggestion` delega sem persistir); unitário do use case provando um `correlationId` por nota compartilhado por todas as chamadas e N distintos para N uploads; unitário provando que falha de telemetria não propaga; gate PostgreSQL escrevendo e lendo eventos reais, verificando os três índices via `pg_indexes` e a ausência de conteúdo sensível.
+
+**Fora de escopo (respeitado).** Dashboard. Exportação. Endpoint HTTP de telemetria. Retenção (P3-03) — nenhum TTL/purge implementado. Qualquer decisão sobre batching (M5-02). Persistência de `ai_suggestion_events` (P3-02) — `recordSuggestion` permanece log-only, delegado sem alteração de comportamento.
 
 ---
 
@@ -2134,8 +2144,8 @@ Ordem para **uma pessoa**, otimizada para reduzir risco cedo e evitar retrabalho
 | 14 | **P5-03** | Exige o banco de produção; segunda **M** do caminho crítico |
 | 15 | **P4-02** ⏸ **HUMAN_DECISION_REQUIRED** | **Bloqueada em 2026-08-28** — depende de ler os limites reais de cota no Google AI Studio (mesma classe de bloqueio de P5-01: acesso a conta externa, não decisão técnica). A própria tarefa já documentava essa dependência ("Não fixei número"). Nenhum código escrito. Ledger próprio, não espera P3-01. Modo A (Free Tier, D4) é o que o piloto usa; Modo B permanece `DEFERRED_WITH_GATE`. |
 | 16 | **P4-03** ✅ | Concluída, pendente de commit desta rodada. Fecha o contorno do teto por usuário. Suíte 422 → 432; Gate 39/39 (sem regressão). |
-| 17 | **P3-01** ← **próxima** | A tarefa mais estrutural de observabilidade, sobre o pipeline já corrigido. Sem dependência de conta externa — retenção já decidida (D2: 60 dias), P0-02 já concluída. |
-| 18 | **P3-00A** | **Nova (2026-08-28), *Should have*, não bloqueadora.** Slot aqui por afinidade temática com P3-02 (decisões sobre `ProductSimilaritySuggestion`), não por dependência técnica real. |
+| 17 | **P3-01** ✅ | Concluída e commitada. `ai_call_events` + `correlationId` gerado no servidor, propagado a extração/similaridade/persistência. `PrismaAiTelemetry` best-effort, log estruturado preservado sem `userId`/`companyId`/`stockId`. Suíte 432 → 441; Gate 39 → 41 (sem regressão). |
+| 18 | **P3-00A** ← **próxima** | **Nova (2026-08-28), *Should have*, não bloqueadora.** Slot aqui por afinidade temática com P3-02 (decisões sobre `ProductSimilaritySuggestion`), não por dependência técnica real. |
 | 19 | **P3-02** | Depende de P3-01; barata logo em seguida |
 | 20 | **P3-03** | Consultas com o dado já modelado; insumo dos runbooks. Retenção de `ai_call_events` já decidida (D2: 60 dias). |
 | 21 | **P3-04** | Exige as duas fontes; precisa existir antes da janela |

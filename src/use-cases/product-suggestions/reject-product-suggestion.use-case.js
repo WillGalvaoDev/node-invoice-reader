@@ -15,7 +15,7 @@ export class RejectProductSuggestionUseCase {
     async execute({ suggestionId, userId }) {
         await authorizeProductSuggestion(suggestionId, userId, this.suggestions, this.stocks);
         const rejected = await this.suggestions.reject(suggestionId, userId);
-        recordAiTelemetryBestEffort(() => this.telemetry.recordSuggestion({ decision: 'rejected', confidence: rejected.confidence }), this.applicationLogger, { event: 'ai_suggestion', decision: 'rejected' });
+        await recordAiTelemetryBestEffort(() => this.telemetry.recordSuggestion({ decision: 'rejected', confidence: rejected.confidence }), this.applicationLogger, { event: 'ai_suggestion', decision: 'rejected' });
         return rejected;
     }
 }

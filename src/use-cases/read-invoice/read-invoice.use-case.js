@@ -34,12 +34,10 @@ export class ReadInvoiceUseCase {
             .replace(/\s+/g, ' ')
             .trim();
     }
-    findSimilarProduct(description, candidates, requestId) {
-        return requestId
-            ? this.aiProvider.findSimilarProduct(description, candidates, { requestId })
-            : this.aiProvider.findSimilarProduct(description, candidates);
-    }
     async execute({ filePath, mimeType, stockId, userId, requestId }) {
+        // Gerado no servidor, nunca aceito do cliente (P3-01): um X-Request-Id fixo em N
+        // uploads não colapsa a correlação, porque este identificador não vem do cliente.
+        const correlationId = randomUUID();
         try {
             const authorizedStock = userId
                 ? await this.stockRepository.findByIdForUser(stockId, userId)
@@ -57,11 +55,16 @@ export class ReadInvoiceUseCase {
                 });
                 throw new AppError('Acesso não autorizado ao estoque informado.', 403);
             }
+            const aiCallContext = {
+                correlationId,
+                ...(requestId && { requestId }),
+                ...(userId && { userId }),
+                companyId: authorizedStock.companyId,
+                stockId,
+            };
             // 1. Extrai os dados da nota fiscal via Gemini OCR
             const fileContent = await this.storageProvider.readFile(filePath);
-            const rawExtractedData = requestId
-                ? await this.aiProvider.extractDanfeData(fileContent, mimeType, { requestId })
-                : await this.aiProvider.extractDanfeData(fileContent, mimeType);
+            const rawExtractedData = await this.aiProvider.extractDanfeData(fileContent, mimeType, aiCallContext);
             let supplierCnpj;
             try {
                 supplierCnpj = parseCnpj(rawExtractedData.supplier.cnpj);
@@ -114,7 +117,7 @@ export class ReadInvoiceUseCase {
                 }
                 const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
                 const similarity = candidates.length > 0
-                    ? await this.findSimilarProduct(item.description, candidates, requestId)
+                    ? await this.aiProvider.findSimilarProduct(item.description, candidates, aiCallContext)
                     : { kind: 'no_match' };
                 // Indisponibilidade não é evidência de item novo. Abortar aqui — antes da
                 // transação — não persiste nada e não consome a chave de idempotência,
@@ -175,9 +178,10 @@ export class ReadInvoiceUseCase {
                 stockId,
                 operations,
                 suggestions: suggestionOperations,
+                correlationId,
             }));
             for (const suggestion of suggestions) {
-                recordAiTelemetryBestEffort(() => this.telemetry.recordSuggestion({ decision: 'created', confidence: suggestion.confidence }), this.applicationLogger, { event: 'ai_suggestion', decision: 'created', ...(requestId && { requestId }) });
+                await recordAiTelemetryBestEffort(() => this.telemetry.recordSuggestion({ decision: 'created', confidence: suggestion.confidence }), this.applicationLogger, { event: 'ai_suggestion', decision: 'created', ...(requestId && { requestId }) });
             }
             await persistAuditBestEffort({
                 repository: this.auditLogRepository,

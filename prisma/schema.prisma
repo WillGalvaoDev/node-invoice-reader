@@ -77,10 +77,12 @@ model Stock {
 }
 
 model ProcessedInvoice {
-  id        String   @id @default(uuid())
-  accessKey String   @unique
-  stockId   String
-  createdAt DateTime @default(now())
+  id            String   @id @default(uuid())
+  accessKey     String   @unique
+  stockId       String
+  // P3-01: liga a nota ao custo/telemetria em ai_call_events, sem nunca aparecer em log.
+  correlationId String?
+  createdAt     DateTime @default(now())
 
   stock              Stock                         @relation(fields: [stockId], references: [id], onDelete: Cascade)
   productSuggestions ProductSimilaritySuggestion[]
@@ -196,4 +198,34 @@ model AuditLog {
   @@index([companyId, createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+// P3-01: observabilidade de chamadas de IA, nunca autoridade de gasto (ver ai_usage_ledger, P4-02).
+// Escrita best-effort e fora de qualquer transação de domínio — perder uma linha aqui nunca reverte uma nota.
+// Sem FK para User/Company/Stock: tabela de alto volume e best-effort, deliberadamente desacoplada do
+// ciclo de vida dessas entidades (nenhuma consulta desta tarefa navega a relação via Prisma).
+model AiCallEvent {
+  id                    String   @id @default(uuid())
+  correlationId         String
+  requestId             String?
+  operation             String
+  model                 String
+  modelVersion          String?
+  status                String
+  durationMs            Float
+  attempts              Int
+  inputTokens           Int?
+  outputTokens          Int?
+  totalTokens           Int?
+  estimatedCostUsdNanos Int?
+  failureCategory       String?
+  userId                String?
+  companyId             String?
+  stockId               String?
+  createdAt             DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([correlationId])
+  @@index([operation, createdAt])
+  @@map("ai_call_events")
 }

@@ -93,7 +93,7 @@ describe('ReadInvoiceUseCase', () => {
         const stockId = 'stock-1';
         const result = await sut.execute({ filePath, mimeType: 'image/jpeg', stockId, userId });
         expect(storageProviderMock.readFile).toHaveBeenCalledWith(filePath);
-        expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(Buffer.from('mock-file-content'), 'image/jpeg');
+        expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(Buffer.from('mock-file-content'), 'image/jpeg', expect.objectContaining({ correlationId: expect.any(String), userId, stockId, companyId: 'company-1' }));
         expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
         expect(invoicePersistenceMock.persist.mock.calls[0]?.[0].operations[0]).toEqual({
             product: expect.objectContaining({ ...mockAiResult.products[0], stockId, userId })
@@ -365,7 +365,7 @@ describe('ReadInvoiceUseCase', () => {
         await sut.execute({ filePath: '/path/owner.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'owner-1' });
         expect(stockRepositoryMock.findByIdForUser).toHaveBeenCalledWith('stock-1', 'owner-1');
         expect(storageProviderMock.readFile).toHaveBeenCalledWith('/path/owner.png');
-        expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(Buffer.from('mock-file-content'), 'image/png');
+        expect(aiProviderMock.extractDanfeData).toHaveBeenCalledWith(Buffer.from('mock-file-content'), 'image/png', expect.objectContaining({ correlationId: expect.any(String) }));
         expect(invoicePersistenceMock.persist).toHaveBeenCalledOnce();
     });
     it('permite que collaborator com canCreate processe entrada', async () => {
@@ -443,6 +443,31 @@ describe('ReadInvoiceUseCase', () => {
         expect(productRepositoryMock.save).not.toHaveBeenCalled();
         expect(productRepositoryMock.update).not.toHaveBeenCalled();
         expect(invoicePersistenceMock.persist).not.toHaveBeenCalled();
+    });
+    it('P3-01: extractDanfeData, findSimilarProduct e a persistência compartilham um único correlationId por upload', async () => {
+        const similarProduct = {
+            id: 'similar-id', code: 'PAR-001', description: 'PARAFUSO SEXTAVADO 1/4 INCH', quantity: 100,
+            unitMeasurement: 'UN', unitPrice: 2.10, totalPrice: 210.00, stockId: 'stock-1', userId: 'user-any-id',
+        };
+        productRepositoryMock.findByStockId.mockResolvedValue([similarProduct]);
+        aiProviderMock.findSimilarProduct.mockResolvedValue({ kind: 'match', product: similarProduct, confidence: 0.9, reason: 'equivalente' });
+        await sut.execute({ filePath: '/path/nota.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-any-id' });
+        const extractionCorrelationId = aiProviderMock.extractDanfeData.mock.calls[0]?.[2]?.correlationId;
+        const similarityCorrelationId = aiProviderMock.findSimilarProduct.mock.calls[0]?.[2]?.correlationId;
+        const persistedCorrelationId = invoicePersistenceMock.persist.mock.calls[0]?.[0].correlationId;
+        expect(extractionCorrelationId).toEqual(expect.any(String));
+        expect(similarityCorrelationId).toBe(extractionCorrelationId);
+        expect(persistedCorrelationId).toBe(extractionCorrelationId);
+    });
+    it('P3-01: correlationId é gerado no servidor — um X-Request-Id fixo repetido em N uploads produz N correlationId distintos', async () => {
+        const fixedRequestId = 'client-controlled-fixed-id';
+        await sut.execute({ filePath: '/path/one.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1', requestId: fixedRequestId });
+        await sut.execute({ filePath: '/path/two.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1', requestId: fixedRequestId });
+        await sut.execute({ filePath: '/path/three.png', mimeType: 'image/png', stockId: 'stock-1', userId: 'user-1', requestId: fixedRequestId });
+        const correlationIds = aiProviderMock.extractDanfeData.mock.calls.map((call) => call[2]?.correlationId);
+        expect(correlationIds).toHaveLength(3);
+        expect(new Set(correlationIds).size).toBe(3);
+        expect(aiProviderMock.extractDanfeData.mock.calls.every((call) => call[2]?.requestId === fixedRequestId)).toBe(true);
     });
     it('rejeita DANFE incoerente antes de exact match, similarity e persistência', async () => {
         aiProviderMock.extractDanfeData.mockResolvedValueOnce({

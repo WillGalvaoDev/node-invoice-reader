@@ -1,5 +1,5 @@
 import type { IStorageProvider } from '../../providers/storage.provider.js';
-import type { IAiProvider, IDanfeExtractResult, ISimilarityResult } from '../../providers/ai.provider.js';
+import type { IAiCallContext, IAiProvider, IDanfeExtractResult, ISimilarityResult } from '../../providers/ai.provider.js';
 import type { IProductRepository, IProduct } from '../../repositories/product.repository.js';
 import type { IAuditLogRepository } from '../../repositories/audit-log.repository.js';
 import type { IStockRepository } from '../../repositories/stock.repository.js';
@@ -60,17 +60,11 @@ export class ReadInvoiceUseCase {
       .trim();
   }
 
-  private findSimilarProduct(
-    description: string,
-    candidates: IProduct[],
-    requestId?: string | undefined,
-  ): Promise<ISimilarityResult> {
-    return requestId
-      ? this.aiProvider.findSimilarProduct(description, candidates, { requestId })
-      : this.aiProvider.findSimilarProduct(description, candidates);
-  }
-
   async execute({ filePath, mimeType, stockId, userId, requestId }: IReadInvoiceRequest): Promise<IReadInvoiceResponse> {
+    // Gerado no servidor, nunca aceito do cliente (P3-01): um X-Request-Id fixo em N
+    // uploads não colapsa a correlação, porque este identificador não vem do cliente.
+    const correlationId = randomUUID();
+
     try {
       const authorizedStock = userId
         ? await this.stockRepository.findByIdForUser(stockId, userId)
@@ -91,11 +85,17 @@ export class ReadInvoiceUseCase {
         throw new AppError('Acesso não autorizado ao estoque informado.', 403);
       }
 
+      const aiCallContext: IAiCallContext = {
+        correlationId,
+        ...(requestId && { requestId }),
+        ...(userId && { userId }),
+        companyId: authorizedStock.companyId,
+        stockId,
+      };
+
       // 1. Extrai os dados da nota fiscal via Gemini OCR
       const fileContent = await this.storageProvider.readFile(filePath);
-      const rawExtractedData = requestId
-        ? await this.aiProvider.extractDanfeData(fileContent, mimeType, { requestId })
-        : await this.aiProvider.extractDanfeData(fileContent, mimeType);
+      const rawExtractedData = await this.aiProvider.extractDanfeData(fileContent, mimeType, aiCallContext);
 
       let supplierCnpj: string;
       try {
@@ -163,7 +163,7 @@ export class ReadInvoiceUseCase {
 
         const candidates = prefilterSimilarityCandidates(item.description, stockId, existingStockProducts);
         const similarity: ISimilarityResult = candidates.length > 0
-          ? await this.findSimilarProduct(item.description, candidates, requestId)
+          ? await this.aiProvider.findSimilarProduct(item.description, candidates, aiCallContext)
           : { kind: 'no_match' };
 
         // Indisponibilidade não é evidência de item novo. Abortar aqui — antes da
@@ -228,10 +228,11 @@ export class ReadInvoiceUseCase {
         stockId,
         operations,
         suggestions: suggestionOperations,
+        correlationId,
       }));
 
       for (const suggestion of suggestions) {
-        recordAiTelemetryBestEffort(
+        await recordAiTelemetryBestEffort(
           () => this.telemetry.recordSuggestion({ decision: 'created', confidence: suggestion.confidence }),
           this.applicationLogger,
           { event: 'ai_suggestion', decision: 'created', ...(requestId && { requestId }) },

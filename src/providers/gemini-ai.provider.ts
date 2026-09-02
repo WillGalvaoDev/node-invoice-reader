@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import type { GenerateContentParameters, GenerateContentResponse, Schema } from '@google/genai';
-import type { IAiProvider, IDanfeExtractResult, ISimilarityResult } from '../providers/ai.provider.js';
+import type { IAiCallContext, IAiProvider, IDanfeExtractResult, ISimilarityResult } from '../providers/ai.provider.js';
 import type { IProduct } from '../repositories/product.repository.js';
 import { AppError } from '../errors/app-error.js';
 import { env } from '../config/env.js';
@@ -131,26 +131,27 @@ export class GeminiAiProvider implements IAiProvider {
     return 'unknown';
   }
 
-  private recordCall(
+  private async recordCall(
     operation: AiOperation,
     status: 'success' | 'failure',
     startedAt: number,
     attempts: number,
     response?: GenerateContentResponse,
     failureCategory?: AiFailureCategory,
-    requestId?: string,
-  ): void {
+    context?: IAiCallContext,
+  ): Promise<void> {
     const usage = response?.usageMetadata;
     const inputTokens = usage?.promptTokenCount;
     const outputTokens = usage?.candidatesTokenCount === undefined && usage?.thoughtsTokenCount === undefined
       ? undefined
       : (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
-    const costUsdNanos = inputTokens !== undefined && outputTokens !== undefined
+    const estimatedCostUsdNanos = inputTokens !== undefined && outputTokens !== undefined
       ? calculateGeminiCostUsdNanos(GEMINI_MODEL, inputTokens, outputTokens)
       : undefined;
     const event = {
       operation,
-      ...(requestId && { requestId }),
+      ...(context?.requestId && { requestId: context.requestId }),
+      ...(context?.correlationId && { correlationId: context.correlationId }),
       model: GEMINI_MODEL,
       ...(response?.modelVersion && { modelVersion: response.modelVersion }),
       status,
@@ -159,10 +160,13 @@ export class GeminiAiProvider implements IAiProvider {
       ...(inputTokens !== undefined && { inputTokens }),
       ...(outputTokens !== undefined && { outputTokens }),
       ...(usage?.totalTokenCount !== undefined && { totalTokens: usage.totalTokenCount }),
-      ...(costUsdNanos !== undefined && { costUsdNanos }),
+      ...(estimatedCostUsdNanos !== undefined && { estimatedCostUsdNanos }),
       ...(failureCategory && { failureCategory }),
+      ...(context?.userId && { userId: context.userId }),
+      ...(context?.companyId && { companyId: context.companyId }),
+      ...(context?.stockId && { stockId: context.stockId }),
     };
-    recordAiTelemetryBestEffort(
+    await recordAiTelemetryBestEffort(
       () => this.telemetry.recordCall(event),
       this.applicationLogger,
       { event: 'ai_operation', operation, status },
@@ -216,7 +220,7 @@ export class GeminiAiProvider implements IAiProvider {
     };
   }
 
-  async extractDanfeData(content: Buffer, mimeType: DanfeMimeType, context?: { requestId?: string }): Promise<IDanfeExtractResult> {
+  async extractDanfeData(content: Buffer, mimeType: DanfeMimeType, context?: IAiCallContext): Promise<IDanfeExtractResult> {
     const responseSchema: Schema = {
       type: Type.OBJECT,
       properties: {
@@ -276,10 +280,10 @@ export class GeminiAiProvider implements IAiProvider {
         },
       }, () => { attempts += 1; });
       const parsed = this.parseDanfeResponse(response.text);
-      this.recordCall('invoice_extraction', 'success', startedAt, attempts, response, undefined, context?.requestId);
+      await this.recordCall('invoice_extraction', 'success', startedAt, attempts, response, undefined, context);
       return parsed;
     } catch (error) {
-      this.recordCall('invoice_extraction', 'failure', startedAt, attempts, response, this.failureCategory(error), context?.requestId);
+      await this.recordCall('invoice_extraction', 'failure', startedAt, attempts, response, this.failureCategory(error), context);
       throw error;
     }
   }
@@ -287,7 +291,7 @@ export class GeminiAiProvider implements IAiProvider {
   async findSimilarProduct(
     newItemDescription: string,
     existingProducts: IProduct[],
-    context?: { requestId?: string },
+    context?: IAiCallContext,
   ): Promise<ISimilarityResult> {
     // Sem catálogo não há contra o que comparar: conclusão legítima, não indisponibilidade.
     if (existingProducts.length === 0) return { kind: 'no_match' };
@@ -337,7 +341,7 @@ export class GeminiAiProvider implements IAiProvider {
       }, () => { attempts += 1; });
 
       const parsed = this.parseSimilarityResponse(response.text);
-      this.recordCall('product_similarity', 'success', startedAt, attempts, response, undefined, context?.requestId);
+      await this.recordCall('product_similarity', 'success', startedAt, attempts, response, undefined, context);
 
       // O modelo respondeu e negou equivalência, ou não alcançou o limiar: conclusão legítima.
       if (!parsed.matchFound || parsed.confidence < env.SIMILARITY_CONFIDENCE_THRESHOLD) {
@@ -359,7 +363,7 @@ export class GeminiAiProvider implements IAiProvider {
         reason: parsed.reason,
       };
     } catch (error) {
-      this.recordCall('product_similarity', 'failure', startedAt, attempts, response, this.failureCategory(error), context?.requestId);
+      await this.recordCall('product_similarity', 'failure', startedAt, attempts, response, this.failureCategory(error), context);
       return { kind: 'unavailable', reason: this.failureCategory(error) };
     }
   }

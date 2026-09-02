@@ -8,6 +8,7 @@ import { PrismaProductRepository } from './repositories/prisma-product.repositor
 import { PrismaAuditLogRepository } from './repositories/prisma-audit-log.repository.js';
 import { DiskStorageProvider } from './providers/implementations/disk-storage.provider.js';
 import { GeminiAiProvider } from './providers/gemini-ai.provider.js';
+import { PrismaAiTelemetry } from './infra/prisma-ai-telemetry.js';
 import { RegisterUserUseCase } from './use-cases/register-user/register-user.use-case.js';
 import { PrismaUserRepository } from './repositories/prisma-user.repository.js';
 import { Argon2HashProvider } from './providers/implementations/argon2-hash.provider.js';
@@ -60,7 +61,7 @@ export function createRoutes(options) {
 }
 // Injeção - Compartilhados / Repositórios
 const storageProvider = new DiskStorageProvider();
-const aiProvider = new GeminiAiProvider();
+const aiProvider = new GeminiAiProvider({ telemetry: new PrismaAiTelemetry() });
 const productRepository = new PrismaProductRepository();
 const auditLogRepository = new PrismaAuditLogRepository();
 const stockRepository = new PrismaStockRepository();

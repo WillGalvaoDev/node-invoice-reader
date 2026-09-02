@@ -24,10 +24,31 @@ export function confidenceBucket(confidence) {
         return '0.85-0.94';
     return '0.95-1.00';
 }
+/**
+ * Whitelist positiva do canal de log (stdout): userId/companyId/stockId nunca entram aqui,
+ * mesmo que o evento os carregue para persistência em ai_call_events. O mesmo princípio de
+ * P3-00B (whitelist > blacklist) aplicado à segunda dimensão sensível deste evento — não
+ * credenciais, mas identificadores de tenant que não pertencem a um log best-effort.
+ */
+function toLoggableCallEvent(event) {
+    const { requestId, correlationId, operation, model, modelVersion, status, durationMs, attempts, inputTokens, outputTokens, totalTokens, estimatedCostUsdNanos, failureCategory, } = event;
+    return {
+        ...(requestId !== undefined && { requestId }),
+        ...(correlationId !== undefined && { correlationId }),
+        operation, model,
+        ...(modelVersion !== undefined && { modelVersion }),
+        status, durationMs, attempts,
+        ...(inputTokens !== undefined && { inputTokens }),
+        ...(outputTokens !== undefined && { outputTokens }),
+        ...(totalTokens !== undefined && { totalTokens }),
+        ...(estimatedCostUsdNanos !== undefined && { estimatedCostUsdNanos }),
+        ...(failureCategory !== undefined && { failureCategory }),
+    };
+}
 export function createAiTelemetry({ logger: applicationLogger = logger } = {}) {
     return {
         recordCall(event) {
-            applicationLogger.info('AI operation observed', { event: 'ai_operation', ...event });
+            applicationLogger.info('AI operation observed', { event: 'ai_operation', ...toLoggableCallEvent(event) });
         },
         recordSuggestion(event) {
             applicationLogger.info('AI suggestion observed', {
@@ -39,9 +60,9 @@ export function createAiTelemetry({ logger: applicationLogger = logger } = {}) {
     };
 }
 export const aiTelemetry = createAiTelemetry();
-export function recordAiTelemetryBestEffort(record, applicationLogger, context) {
+export async function recordAiTelemetryBestEffort(record, applicationLogger, context) {
     try {
-        record();
+        await record();
     }
     catch (error) {
         try {

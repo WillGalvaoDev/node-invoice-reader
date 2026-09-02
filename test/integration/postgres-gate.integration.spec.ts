@@ -22,12 +22,14 @@ import { ListCompanyStocksUseCase } from '../../src/use-cases/list-company-stock
 import express from 'express';
 import { createApp } from '../../src/app.js';
 import { checkDatabaseHealth } from '../../src/infra/health.js';
+import { PrismaAiTelemetry } from '../../src/infra/prisma-ai-telemetry.js';
 
 const persistence = new PrismaInvoicePersistenceRepository();
 const suggestionRepository = new PrismaProductSuggestionRepository();
 const productRepository = new PrismaProductRepository();
 
 async function cleanDatabase() {
+  await prisma.aiCallEvent.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.productSimilaritySuggestion.deleteMany();
   await prisma.processedInvoice.deleteMany();
@@ -272,6 +274,66 @@ describe('PostgreSQL Integration Gate', () => {
     await expect(useCase.execute({ filePath: 'pending-retry', mimeType: 'image/png', stockId: stock.id, userId: owner.id }))
       .rejects.toMatchObject({ statusCode: 409 });
     expect(await prisma.productSimilaritySuggestion.count({ where: { processedInvoice: { accessKey } } })).toBe(2);
+  });
+
+  it('P3-01: índices reais de ai_call_events existem', async () => {
+    const indexes = await indexNames('ai_call_events');
+    expect(indexes).toContain('ai_call_events_createdAt_idx');
+    expect(indexes).toContain('ai_call_events_correlationId_idx');
+    expect(indexes).toContain('ai_call_events_operation_createdAt_idx');
+  });
+
+  it('P3-01: upload real grava 1 evento invoice_extraction e 1 por similaridade, todos com o correlationId da nota, sem conteúdo de documento', async () => {
+    const { owner, stock } = await seedOwnerAndStock();
+    const candidate = await prisma.product.create({ data: product(stock.id, 'AI-EVT-CANDIDATE', 10) });
+    const accessKey = '95000000000000000000000000000000000000000001';
+    const extracted: IDanfeExtractResult = {
+      accessKey, invoiceNumber: '95', series: '1', issuedAt: new Date(), totalValue: 130,
+      supplier: { cnpj: '11222333000181', name: 'Fornecedor' },
+      products: [
+        { code: 'AI-EVT-NEW-1', description: 'Produto novo um', quantity: 5, unitPrice: 20, totalPrice: 100, unitMeasurement: 'UN' },
+        { code: 'AI-EVT-NEW-2', description: 'Produto novo dois', quantity: 2, unitPrice: 15, totalPrice: 30, unitMeasurement: 'UN' },
+      ],
+    };
+    const ai: IAiProvider = {
+      async extractDanfeData(_content, _mimeType, context) {
+        await new PrismaAiTelemetry().recordCall({
+          correlationId: context!.correlationId!, operation: 'invoice_extraction', model: 'gemini-2.5-flash',
+          status: 'success', durationMs: 42, attempts: 1,
+          ...(context?.userId && { userId: context.userId }), ...(context?.companyId && { companyId: context.companyId }),
+          ...(context?.stockId && { stockId: context.stockId }),
+        });
+        return extracted;
+      },
+      async findSimilarProduct(_description, _candidates, context) {
+        await new PrismaAiTelemetry().recordCall({
+          correlationId: context!.correlationId!, operation: 'product_similarity', model: 'gemini-2.5-flash',
+          status: 'success', durationMs: 7, attempts: 1,
+          ...(context?.userId && { userId: context.userId }), ...(context?.companyId && { companyId: context.companyId }),
+          ...(context?.stockId && { stockId: context.stockId }),
+        });
+        return { kind: 'no_match' as const };
+      },
+    };
+    const storage: IStorageProvider = { async readFile() { return Buffer.alloc(0); }, async deleteFile() {} };
+    const useCase = new ReadInvoiceUseCase(storage, ai, new PrismaProductRepository(), new PrismaAuditLogRepository(), new PrismaStockRepository(), persistence);
+
+    await useCase.execute({ filePath: 'ai-events-file', mimeType: 'image/png', stockId: stock.id, userId: owner.id });
+    void candidate;
+
+    const invoice = await prisma.processedInvoice.findUniqueOrThrow({ where: { accessKey } });
+    expect(invoice.correlationId).toEqual(expect.any(String));
+
+    const events = await prisma.aiCallEvent.findMany({ where: { correlationId: invoice.correlationId! } });
+    expect(events).toHaveLength(3);
+    expect(events.filter((event) => event.operation === 'invoice_extraction')).toHaveLength(1);
+    expect(events.filter((event) => event.operation === 'product_similarity')).toHaveLength(2);
+    expect(events.every((event) => event.userId === owner.id && event.companyId === stock.companyId)).toBe(true);
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(accessKey);
+    expect(serialized).not.toContain('Produto novo');
+    expect(serialized).not.toContain('11222333000181');
   });
 
   it('confirma PENDING com weighted average e impede segunda aplicacao', async () => {

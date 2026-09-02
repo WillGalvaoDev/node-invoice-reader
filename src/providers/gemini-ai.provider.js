@@ -106,18 +106,19 @@ export class GeminiAiProvider {
             return 'provider_error';
         return 'unknown';
     }
-    recordCall(operation, status, startedAt, attempts, response, failureCategory, requestId) {
+    async recordCall(operation, status, startedAt, attempts, response, failureCategory, context) {
         const usage = response?.usageMetadata;
         const inputTokens = usage?.promptTokenCount;
         const outputTokens = usage?.candidatesTokenCount === undefined && usage?.thoughtsTokenCount === undefined
             ? undefined
             : (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
-        const costUsdNanos = inputTokens !== undefined && outputTokens !== undefined
+        const estimatedCostUsdNanos = inputTokens !== undefined && outputTokens !== undefined
             ? calculateGeminiCostUsdNanos(GEMINI_MODEL, inputTokens, outputTokens)
             : undefined;
         const event = {
             operation,
-            ...(requestId && { requestId }),
+            ...(context?.requestId && { requestId: context.requestId }),
+            ...(context?.correlationId && { correlationId: context.correlationId }),
             model: GEMINI_MODEL,
             ...(response?.modelVersion && { modelVersion: response.modelVersion }),
             status,
@@ -126,10 +127,13 @@ export class GeminiAiProvider {
             ...(inputTokens !== undefined && { inputTokens }),
             ...(outputTokens !== undefined && { outputTokens }),
             ...(usage?.totalTokenCount !== undefined && { totalTokens: usage.totalTokenCount }),
-            ...(costUsdNanos !== undefined && { costUsdNanos }),
+            ...(estimatedCostUsdNanos !== undefined && { estimatedCostUsdNanos }),
             ...(failureCategory && { failureCategory }),
+            ...(context?.userId && { userId: context.userId }),
+            ...(context?.companyId && { companyId: context.companyId }),
+            ...(context?.stockId && { stockId: context.stockId }),
         };
-        recordAiTelemetryBestEffort(() => this.telemetry.recordCall(event), this.applicationLogger, { event: 'ai_operation', operation, status });
+        await recordAiTelemetryBestEffort(() => this.telemetry.recordCall(event), this.applicationLogger, { event: 'ai_operation', operation, status });
     }
     parseJson(text) {
         if (typeof text !== 'string' || text.trim() === '') {
@@ -229,11 +233,11 @@ export class GeminiAiProvider {
                 },
             }, () => { attempts += 1; });
             const parsed = this.parseDanfeResponse(response.text);
-            this.recordCall('invoice_extraction', 'success', startedAt, attempts, response, undefined, context?.requestId);
+            await this.recordCall('invoice_extraction', 'success', startedAt, attempts, response, undefined, context);
             return parsed;
         }
         catch (error) {
-            this.recordCall('invoice_extraction', 'failure', startedAt, attempts, response, this.failureCategory(error), context?.requestId);
+            await this.recordCall('invoice_extraction', 'failure', startedAt, attempts, response, this.failureCategory(error), context);
             throw error;
         }
     }
@@ -280,7 +284,7 @@ export class GeminiAiProvider {
                 }
             }, () => { attempts += 1; });
             const parsed = this.parseSimilarityResponse(response.text);
-            this.recordCall('product_similarity', 'success', startedAt, attempts, response, undefined, context?.requestId);
+            await this.recordCall('product_similarity', 'success', startedAt, attempts, response, undefined, context);
             // O modelo respondeu e negou equivalência, ou não alcançou o limiar: conclusão legítima.
             if (!parsed.matchFound || parsed.confidence < env.SIMILARITY_CONFIDENCE_THRESHOLD) {
                 return { kind: 'no_match' };
@@ -300,7 +304,7 @@ export class GeminiAiProvider {
             };
         }
         catch (error) {
-            this.recordCall('product_similarity', 'failure', startedAt, attempts, response, this.failureCategory(error), context?.requestId);
+            await this.recordCall('product_similarity', 'failure', startedAt, attempts, response, this.failureCategory(error), context);
             return { kind: 'unavailable', reason: this.failureCategory(error) };
         }
     }

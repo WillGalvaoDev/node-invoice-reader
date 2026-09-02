@@ -7,6 +7,7 @@ export type ConfidenceBucket = '0.00-0.49' | '0.50-0.69' | '0.70-0.84' | '0.85-0
 
 export interface AiCallTelemetryEvent {
   requestId?: string;
+  correlationId?: string;
   operation: AiOperation;
   model: string;
   modelVersion?: string;
@@ -16,8 +17,15 @@ export interface AiCallTelemetryEvent {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
-  costUsdNanos?: number;
+  // Estimado, nunca faturado: sob Free Tier o custo real é zero (D4). Nunca apresentar como cobrança.
+  estimatedCostUsdNanos?: number;
   failureCategory?: AiFailureCategory;
+  // Contexto de correlação para persistência (P3-01). Deliberadamente EXCLUÍDO do canal de
+  // log estruturado (ver createAiTelemetry abaixo) — vai só para ai_call_events, sob as
+  // mesmas regras de acesso do banco, nunca para stdout.
+  userId?: string;
+  companyId?: string;
+  stockId?: string;
 }
 
 export interface AiSuggestionTelemetryEvent {
@@ -26,7 +34,9 @@ export interface AiSuggestionTelemetryEvent {
 }
 
 export interface IAiTelemetry {
-  recordCall(event: AiCallTelemetryEvent): void;
+  // Assíncrono para permitir implementações que persistem em banco (P3-01: PrismaAiTelemetry).
+  // Sempre invocado através de recordAiTelemetryBestEffort, nunca sem await, no call site.
+  recordCall(event: AiCallTelemetryEvent): void | Promise<void>;
   recordSuggestion(event: AiSuggestionTelemetryEvent): void;
 }
 
@@ -62,10 +72,36 @@ export function confidenceBucket(confidence: number): ConfidenceBucket {
   return '0.95-1.00';
 }
 
+/**
+ * Whitelist positiva do canal de log (stdout): userId/companyId/stockId nunca entram aqui,
+ * mesmo que o evento os carregue para persistência em ai_call_events. O mesmo princípio de
+ * P3-00B (whitelist > blacklist) aplicado à segunda dimensão sensível deste evento — não
+ * credenciais, mas identificadores de tenant que não pertencem a um log best-effort.
+ */
+function toLoggableCallEvent(event: AiCallTelemetryEvent): Record<string, unknown> {
+  const {
+    requestId, correlationId, operation, model, modelVersion, status,
+    durationMs, attempts, inputTokens, outputTokens, totalTokens,
+    estimatedCostUsdNanos, failureCategory,
+  } = event;
+  return {
+    ...(requestId !== undefined && { requestId }),
+    ...(correlationId !== undefined && { correlationId }),
+    operation, model,
+    ...(modelVersion !== undefined && { modelVersion }),
+    status, durationMs, attempts,
+    ...(inputTokens !== undefined && { inputTokens }),
+    ...(outputTokens !== undefined && { outputTokens }),
+    ...(totalTokens !== undefined && { totalTokens }),
+    ...(estimatedCostUsdNanos !== undefined && { estimatedCostUsdNanos }),
+    ...(failureCategory !== undefined && { failureCategory }),
+  };
+}
+
 export function createAiTelemetry({ logger: applicationLogger = logger }: { logger?: Logger } = {}): IAiTelemetry {
   return {
     recordCall(event) {
-      applicationLogger.info('AI operation observed', { event: 'ai_operation', ...event });
+      applicationLogger.info('AI operation observed', { event: 'ai_operation', ...toLoggableCallEvent(event) });
     },
     recordSuggestion(event) {
       applicationLogger.info('AI suggestion observed', {
@@ -79,13 +115,13 @@ export function createAiTelemetry({ logger: applicationLogger = logger }: { logg
 
 export const aiTelemetry = createAiTelemetry();
 
-export function recordAiTelemetryBestEffort(
-  record: () => void,
+export async function recordAiTelemetryBestEffort(
+  record: () => void | Promise<void>,
   applicationLogger: Logger,
   context: Record<string, unknown>,
-): void {
+): Promise<void> {
   try {
-    record();
+    await record();
   } catch (error) {
     try {
       applicationLogger.warn('AI telemetry recording failed', {
