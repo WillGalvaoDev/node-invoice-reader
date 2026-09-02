@@ -52,3 +52,35 @@ jobs:
         run: npm prune --omit=dev
       - run: npm ls --omit=dev
       - run: npm run verify:production
+
+  render-build-command:
+    # Prova, em checkout novo, o comando exato documentado como Build Command do Render
+    # (README.md, "## Deploy (Render + Neon)"). Existe porque os outros jobs decompõem
+    # prisma:generate/build em steps separados e nunca testaram a string composta que o
+    # Render de fato executa — foi assim que a falta de `prisma generate` no build command
+    # passou despercebida até o primeiro deploy real (r22, docs/pilot-readiness-roadmap.md).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: docscan_render_build_check
+          POSTGRES_USER: docscan_render_build_check
+          POSTGRES_PASSWORD: docscan_render_build_check_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://docscan_render_build_check:docscan_render_build_check_only@127.0.0.1:5432/docscan_render_build_check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: npm ci && npm run render:build (Build Command do Render)
+        run: npm ci && npm run render:build
