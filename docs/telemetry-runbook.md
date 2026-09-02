@@ -8,12 +8,13 @@
 
 - `ai_call_events` (P3-01) — uma linha por chamada real ao Gemini (`invoice_extraction`/`product_similarity`), best-effort, nunca autoridade de gasto. Colunas: `id`, `correlationId`, `requestId`, `operation`, `model`, `modelVersion`, `status`, `durationMs`, `attempts`, `inputTokens`, `outputTokens`, `totalTokens`, `estimatedCostUsdNanos`, `failureCategory`, `userId`, `companyId`, `stockId`, `createdAt`.
 - `ai_suggestion_events` (P3-02) — **view**, não tabela, sobre `product_similarity_suggestions` + `processed_invoices` + `stocks`. Cada sugestão gera um evento `created`; se decidida, um segundo evento `confirmed`/`rejected`. Colunas: `suggestionId`, `correlationId`, `stockId`, `companyId`, `decision`, `confidence` (bruta, `Decimal(5,4)`), `decidedByUserId`, `eventAt`.
+- `ai_usage_ledger` (P4-02) — registro **autoritativo**, escrita forte, decide se uma chamada pode acontecer. `(scope, scopeId, periodKind, period)` como chave (`scope` ∈ `global`/`user`; `periodKind` só usa `day` hoje); `reservedRequests`/`spentRequests`/`reservedTokens`/`spentTokens`/`reservedCostUsdNanos`/`spentCostUsdNanos`. **Nunca lido para gerar as 8 perguntas acima** — é comparado contra `ai_call_events` só na reconciliação (abaixo).
 
 **O que NÃO existe na telemetria, por design (não é lacuna, é decisão registrada):**
 
 - Conteúdo do documento (imagem/PDF), `accessKey`, descrição de produto ou qualquer prompt/resposta bruta do Gemini — nunca persistidos, nem em `ai_call_events` nem em log.
 - Custo **faturado** — `estimatedCostUsdNanos` é sempre estimado; sob Free Tier (D4) o faturado é sempre zero. Nunca apresentar a estimativa como cobrança.
-- Autorização de gasto — nada aqui decide se uma chamada de IA pode acontecer (isso é `ai_usage_ledger`, P4-02, ainda não implementado). Consultar esta telemetria nunca deve virar um `if` de autorização em código.
+- Teto de tokens — `ai_usage_ledger` acumula `spentTokens`/`spentCostUsdNanos` sem impor limite (D8): ausência deliberada de dado empírico, nunca zero nem ilimitado por acidente.
 - `confidenceBucket` persistido — a faixa é sempre calculada na consulta (ver perguntas 6 e 7), nunca na emissão.
 
 ---
@@ -226,7 +227,7 @@ Se `oldest` estiver a mais de 60 dias da data atual, a retenção (abaixo) está
 
 ## Retenção — 60 dias (D2)
 
-**Escopo da decisão (D2, `docs/pilot-decisions.md`): somente `ai_call_events`.** Nunca `AuditLog` (D7 — sem purga automática durante o piloto) nem `ai_usage_ledger` (P4-02 — nunca apagado por nenhuma política de retenção, ainda nem implementado). O script (`scripts/purge-ai-call-events.mjs`) toca apenas uma tabela, por construção — não recebe nome de tabela como parâmetro.
+**Escopo da decisão (D2, `docs/pilot-decisions.md`): somente `ai_call_events`.** Nunca `AuditLog` (D7 — sem purga automática durante o piloto) nem `ai_usage_ledger` (P4-02 — nunca apagado por nenhuma política de retenção). O script (`scripts/purge-ai-call-events.mjs`) toca apenas uma tabela, por construção — não recebe nome de tabela como parâmetro.
 
 **Como executar:**
 
@@ -239,3 +240,33 @@ Requer `DATABASE_URL` apontando para o banco real (mesma variável de ambiente j
 **Como verificar que funcionou:** o script imprime a contagem de linhas removidas e a data de corte usada. Repetir a consulta de "idade e volume" acima e confirmar `oldest` dentro de 60 dias. Rodar o script duas vezes seguidas sem novo dado deve remover `0` linhas na segunda vez — é o comportamento esperado (idempotente), não um erro.
 
 **Se `DATABASE_URL` não estiver configurada ou a conexão falhar:** o script falha alto (exceção não tratada, saída não-zero) — não há fallback silencioso que "finja" ter rodado a retenção.
+
+---
+
+## Reconciliação ledger × eventos (P3-04)
+
+**Duas fontes deliberadamente diferentes** (P4-02): `ai_usage_ledger` **autoriza** consumo (escrita forte, decide se o Gemini pode ser chamado); `ai_call_events` **observa** consumo (best-effort, nunca autoriza nada). Elas nunca são derivadas uma da outra em tempo de execução — só comparadas periodicamente, por este script.
+
+**Grandeza comparável — não é a mais óbvia.** `ai_call_events` tem uma linha por **operação lógica** (`extractDanfeData`/`findSimilarProduct`); `ai_usage_ledger.spentRequests` debita uma unidade por **tentativa HTTP** (cada retry conta). Comparar `COUNT(ai_call_events)` com `spentRequests` divergiria por construção sempre que houvesse retry, sem ser perda nem anomalia. A comparação correta usa `SUM(ai_call_events.attempts)` — a própria coluna já registra quantas tentativas aquela operação fez.
+
+**Como executar (somente leitura — nunca corrige nada):**
+
+```bash
+npm run reconcile:ai-usage              # reconcilia ontem (UTC) — período já fechado
+npm run reconcile:ai-usage 2026-09-02   # reconcilia uma data específica
+```
+
+Sem argumento, o script usa **ontem** em UTC deliberadamente: reconciliar hoje reportaria `reservedRequests` de uploads genuinamente em andamento como se fosse reserva vazada — falso positivo por o período ainda estar aberto.
+
+**Leitura do relatório, por bloco (`escopo:id — período`):**
+- `requests: reconciliado.` — `SUM(attempts)` bate com `spentRequests`.
+- `requests: dentro da tolerância (+1) — possivelmente tentativa recusada por cota no meio de um retry.` — **não é anomalia.** Uma tentativa que o guard recusou por cota, no meio de um retry, incrementa o contador de tentativas do evento antes de a reserva ser revertida — nunca chega a debitar o ledger. É o guard funcionando, não consumo perdido.
+- `ATENÇÃO: eventos > ledger além da tolerância (+N)` — **investigar.** Localizar, por `correlationId` em `ai_call_events` (ver seção acima), quais operações do período têm `attempts` acima do esperado, e cruzar com o log estruturado (`ai_operation`) para descartar mais de uma rejeição de cota na mesma operação antes de tratar como consumo fora do guard.
+- `ATENÇÃO: eventos < ledger além da tolerância` — possível perda best-effort persistente de `ai_call_events`; investigar volume de falha de escrita, não o ledger (que é a fonte confiável aqui).
+- `ANOMALIA: reservedRequests=N residual num período fechado` — **sempre** investigar como falha entre reservar e reconciliar (P4-02), independentemente de requests/tokens baterem.
+
+**Tolerância:** `max(1, 5% do valor do ledger)`, aplicada a requests/tokens/custo independentemente. O piso de 1 evita que, no volume do piloto (teto de 18 requisições/dia), qualquer perda isolada de telemetria vire falso positivo — recalibrar com dado real do piloto (P6-02), não antes.
+
+**O que o script NUNCA faz:** corrigir o ledger a partir dos eventos (reintroduziria a dependência que a separação existe para evitar); apagar ou alterar qualquer linha de `ai_call_events`, `ai_usage_ledger` ou `AuditLog`; ler o painel de cota do AI Studio ou o faturamento do Google (não há API documentada).
+
+**Procedimento manual, a cada execução (sem API para automatizar):** confirmar no console do Google que o **faturamento do projeto continua zero** (D4/D8) — é como se detecta que alguém habilitou billing sem passar pelo gate P6-00; e comparar a cota/uso real no **painel do AI Studio** contra `ai_usage_ledger.spentRequests` do período — divergência aqui calibra a margem do teto interno (18/dia global, 5/dia por usuário), nunca é lida automaticamente pelo script.

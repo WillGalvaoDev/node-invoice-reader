@@ -19,7 +19,8 @@
     "start": "node src/index.js",
     "verify:production": "node scripts/verify-production-runtime.mjs",
     "verify:artifacts": "node scripts/verify-build-artifacts.mjs",
-    "retention:ai-call-events": "node scripts/purge-ai-call-events.mjs"
+    "retention:ai-call-events": "node scripts/purge-ai-call-events.mjs",
+    "reconcile:ai-usage": "node scripts/reconcile-ai-usage.mjs"
   },
   "keywords": [],
   "author": "",
