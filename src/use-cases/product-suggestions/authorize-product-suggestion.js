@@ -6,6 +6,6 @@ export async function authorizeProductSuggestion(suggestionId, userId, suggestio
     const stock = await stocks.findByIdForUser(suggestion.stockId, userId);
     if (!stock)
         throw new AppError('Acesso não autorizado à sugestão.', 403);
-    return suggestion;
+    return { suggestion, companyId: stock.companyId };
 }
 //# sourceMappingURL=authorize-product-suggestion.js.map

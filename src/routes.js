@@ -92,8 +92,8 @@ const createCompanyUseCase = new CreateCompanyUseCase(companyRepository, auditLo
 const createCompanyController = new CreateCompanyController(createCompanyUseCase);
 const listCompaniesController = new ListCompaniesController(new ListCompaniesUseCase(companyRepository));
 const listCompanyStocksController = new ListCompanyStocksController(new ListCompanyStocksUseCase(companyRepository, stockRepository));
-const confirmSuggestionController = new ConfirmProductSuggestionController(new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository));
-const rejectSuggestionController = new RejectProductSuggestionController(new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository));
+const confirmSuggestionController = new ConfirmProductSuggestionController(new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository, auditLogRepository));
+const rejectSuggestionController = new RejectProductSuggestionController(new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository, auditLogRepository));
 const listSuggestionsController = new ListPendingProductSuggestionsController(new ListPendingProductSuggestionsUseCase(productSuggestionRepository, stockRepository));
 export const routes = createRoutes({
     authenticate: ensureAuthenticated,

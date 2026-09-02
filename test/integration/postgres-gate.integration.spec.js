@@ -305,7 +305,7 @@ describe('PostgreSQL Integration Gate', () => {
         const { owner, stock } = await seedOwnerAndStock();
         const candidate = await prisma.product.create({ data: product(stock.id, 'CONFIRM', 10, { unitPrice: 5, totalPrice: 50 }) });
         const suggestion = await seedPendingSuggestion(stock.id, candidate.id);
-        const useCase = new ConfirmProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository());
+        const useCase = new ConfirmProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository(), new PrismaAuditLogRepository());
         const decided = await useCase.execute({ suggestionId: suggestion.id, userId: owner.id });
         expect(decided).toMatchObject({ status: 'CONFIRMED', decidedByUserId: owner.id, decidedAt: expect.any(Date) });
         let persisted = await prisma.product.findUniqueOrThrow({ where: { id: candidate.id } });
@@ -313,6 +313,13 @@ describe('PostgreSQL Integration Gate', () => {
         expect(Number(persisted.unitPrice)).toBe(10);
         expect(persisted.description).toBe('Produto CONFIRM');
         expect((await prisma.productSimilaritySuggestion.findUniqueOrThrow({ where: { id: suggestion.id } })).receivedDescription).toBe('Produto recebido');
+        const auditLog = await prisma.auditLog.findFirstOrThrow({ where: { entity: 'PRODUCT', entityId: candidate.id } });
+        expect(auditLog).toMatchObject({
+            action: 'UPDATE', userId: owner.id, companyId: stock.companyId, stockId: stock.id,
+            previousState: { quantity: 10, unitPrice: 5, totalPrice: 50 },
+            newState: { quantity: 15, unitPrice: 10, totalPrice: 150 },
+        });
+        expect(auditLog.description).not.toContain('invoice');
         await expect(useCase.execute({ suggestionId: suggestion.id, userId: owner.id })).rejects.toMatchObject({ statusCode: 409 });
         persisted = await prisma.product.findUniqueOrThrow({ where: { id: candidate.id } });
         expect(Number(persisted.quantity)).toBe(15);
@@ -322,7 +329,7 @@ describe('PostgreSQL Integration Gate', () => {
         const { owner, stock } = await seedOwnerAndStock();
         const candidate = await prisma.product.create({ data: product(stock.id, 'REJECT-CANDIDATE', 10, { unitPrice: 5, totalPrice: 50 }) });
         const suggestion = await seedPendingSuggestion(stock.id, candidate.id, { receivedCode: 'REJECT-NEW' });
-        const decided = await new RejectProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository())
+        const decided = await new RejectProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository(), new PrismaAuditLogRepository())
             .execute({ suggestionId: suggestion.id, userId: owner.id });
         expect(decided).toMatchObject({ status: 'REJECTED', decidedByUserId: owner.id, decidedAt: expect.any(Date) });
         const unchangedCandidate = await prisma.product.findUniqueOrThrow({ where: { id: candidate.id } });
@@ -332,6 +339,12 @@ describe('PostgreSQL Integration Gate', () => {
         expect(Number(created.quantity)).toBe(5);
         expect(Number(created.unitPrice)).toBe(20);
         expect(created.description).toBe('Produto recebido');
+        const auditLog = await prisma.auditLog.findFirstOrThrow({ where: { entity: 'PRODUCT', entityId: created.id } });
+        expect(auditLog).toMatchObject({
+            action: 'CREATE', userId: owner.id, companyId: stock.companyId, stockId: stock.id,
+            previousState: null, newState: { quantity: 5, unitPrice: 20, totalPrice: 100 },
+        });
+        expect(auditLog.description).toContain('rejeitada');
     });
     it('duas confirmacoes concorrentes produzem uma decisao e uma entrada', async () => {
         const { owner, stock } = await seedOwnerAndStock();
@@ -375,7 +388,7 @@ describe('PostgreSQL Integration Gate', () => {
         const outsider = await prisma.user.create({ data: { email: `decision-outsider-${crypto.randomUUID()}@test.local`, name: 'Outsider', password: 'hash' } });
         const candidate = await prisma.product.create({ data: product(stock.id, 'DENIED-SUGGESTION', 10) });
         const suggestion = await seedPendingSuggestion(stock.id, candidate.id);
-        await expect(new ConfirmProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository())
+        await expect(new ConfirmProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository(), new PrismaAuditLogRepository())
             .execute({ suggestionId: suggestion.id, userId: outsider.id })).rejects.toMatchObject({ statusCode: 403 });
         expect(await prisma.productSimilaritySuggestion.findUniqueOrThrow({ where: { id: suggestion.id } })).toMatchObject({ status: 'PENDING' });
         expect(Number((await prisma.product.findUniqueOrThrow({ where: { id: candidate.id } })).quantity)).toBe(10);
@@ -387,7 +400,7 @@ describe('PostgreSQL Integration Gate', () => {
         await prisma.stockPermission.create({ data: { collaboratorId: membership.id, stockId: stock.id, canCreate: true } });
         const candidate = await prisma.product.create({ data: product(stock.id, 'COLLAB-SUGGESTION', 10, { unitPrice: 5, totalPrice: 50 }) });
         const suggestion = await seedPendingSuggestion(stock.id, candidate.id);
-        await expect(new ConfirmProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository())
+        await expect(new ConfirmProductSuggestionUseCase(suggestionRepository, new PrismaStockRepository(), new PrismaAuditLogRepository())
             .execute({ suggestionId: suggestion.id, userId: collaborator.id }))
             .resolves.toMatchObject({ status: 'CONFIRMED', decidedByUserId: collaborator.id });
         expect(Number((await prisma.product.findUniqueOrThrow({ where: { id: candidate.id } })).quantity)).toBe(15);

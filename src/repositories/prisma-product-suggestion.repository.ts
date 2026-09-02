@@ -1,7 +1,7 @@
 import type { ProductSimilaritySuggestion } from '@prisma/client';
 import { prisma } from '../infra/prisma.js';
 import { AppError } from '../errors/app-error.js';
-import type { IProductSimilaritySuggestion, IProductSuggestionRepository } from './product-suggestion.repository.js';
+import type { IProductSimilaritySuggestion, IProductSuggestionDecision, IProductSuggestionRepository } from './product-suggestion.repository.js';
 import { upsertWeightedProductEntry } from './prisma-weighted-product-entry.js';
 
 function toDomain(raw: ProductSimilaritySuggestion): IProductSimilaritySuggestion {
@@ -39,7 +39,7 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
     return suggestions.map(toDomain);
   }
 
-  async confirm(id: string, userId: string): Promise<IProductSimilaritySuggestion> {
+  async confirm(id: string, userId: string): Promise<IProductSuggestionDecision> {
     return prisma.$transaction(async (transaction) => {
       const claimed = await transaction.productSimilaritySuggestion.updateMany({
         where: { id, status: 'PENDING' },
@@ -53,6 +53,12 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
       if (suggestion.suggestedProduct.stockId !== suggestion.stockId) {
         throw new AppError('Sugestão incompatível com o estoque.', 409);
       }
+
+      const previousProduct = {
+        quantity: Number(suggestion.suggestedProduct.quantity),
+        unitPrice: Number(suggestion.suggestedProduct.unitPrice),
+        totalPrice: Number(suggestion.suggestedProduct.totalPrice),
+      };
 
       const product = await upsertWeightedProductEntry(transaction, {
         id: suggestion.suggestedProduct.id,
@@ -69,11 +75,16 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
         throw new AppError('Sugestão incompatível com o produto.', 409);
       }
 
-      return toDomain(suggestion);
+      return {
+        suggestion: toDomain(suggestion),
+        productId: product.id,
+        previousProduct,
+        nextProduct: { quantity: Number(product.quantity), unitPrice: Number(product.unitPrice), totalPrice: Number(product.totalPrice) },
+      };
     });
   }
 
-  async reject(id: string, userId: string): Promise<IProductSimilaritySuggestion> {
+  async reject(id: string, userId: string): Promise<IProductSuggestionDecision> {
     return prisma.$transaction(async (transaction) => {
       const claimed = await transaction.productSimilaritySuggestion.updateMany({
         where: { id, status: 'PENDING' },
@@ -82,6 +93,16 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
       if (claimed.count !== 1) throw new AppError('Sugestão já decidida.', 409);
 
       const suggestion = await transaction.productSimilaritySuggestion.findUniqueOrThrow({ where: { id } });
+
+      const existingProduct = await transaction.product.findUnique({
+        where: { stockId_code: { stockId: suggestion.stockId, code: suggestion.receivedCode } },
+      });
+      const previousProduct = existingProduct ? {
+        quantity: Number(existingProduct.quantity),
+        unitPrice: Number(existingProduct.unitPrice),
+        totalPrice: Number(existingProduct.totalPrice),
+      } : null;
+
       const product = await upsertWeightedProductEntry(transaction, {
         code: suggestion.receivedCode,
         description: suggestion.receivedDescription,
@@ -96,7 +117,12 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
         throw new AppError('A rejeição não pode alterar o produto sugerido.', 409);
       }
 
-      return toDomain(suggestion);
+      return {
+        suggestion: toDomain(suggestion),
+        productId: product.id,
+        previousProduct,
+        nextProduct: { quantity: Number(product.quantity), unitPrice: Number(product.unitPrice), totalPrice: Number(product.totalPrice) },
+      };
     });
   }
 }

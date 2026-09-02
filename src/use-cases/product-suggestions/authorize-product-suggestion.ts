@@ -7,11 +7,11 @@ export async function authorizeProductSuggestion(
   userId: string,
   suggestions: IProductSuggestionRepository,
   stocks: Pick<IStockRepository, 'findByIdForUser'>,
-): Promise<IProductSimilaritySuggestion> {
+): Promise<{ suggestion: IProductSimilaritySuggestion; companyId: string }> {
   const suggestion = await suggestions.findById(suggestionId);
   if (!suggestion) throw new AppError('Sugestão não encontrada.', 404);
 
   const stock = await stocks.findByIdForUser(suggestion.stockId, userId);
   if (!stock) throw new AppError('Acesso não autorizado à sugestão.', 403);
-  return suggestion;
+  return { suggestion, companyId: stock.companyId };
 }

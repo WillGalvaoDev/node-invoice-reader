@@ -43,6 +43,20 @@ export declare const auditEvents: {
         previous: ProductAuditFigures | null;
         next: ProductAuditFigures;
     }): AuditLogWrite;
+    /**
+     * Decisão humana sobre sugestão de similaridade (P3-00A): confirmar aplica a entrada no
+     * produto sugerido; rejeitar aplica a um produto diferente. Mesma forma de `productEntry`
+     * (entity/action/estados), descrição própria — não é "processado por invoice".
+     */
+    productSuggestionDecided({ userId, companyId, stockId, productId, decision, previous, next }: {
+        userId?: string | undefined;
+        companyId: string;
+        stockId: string;
+        productId: string;
+        decision: "confirmed" | "rejected";
+        previous: ProductAuditFigures | null;
+        next: ProductAuditFigures;
+    }): AuditLogWrite;
     /** Nenhum material de senha entra aqui — só o inteiro de revogação, antes e depois. */
     userPasswordChanged({ userId, previousAuthVersion, newAuthVersion }: {
         userId: string;

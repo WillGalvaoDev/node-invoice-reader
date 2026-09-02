@@ -103,6 +103,35 @@ export const auditEvents = {
     });
   },
 
+  /**
+   * Decisão humana sobre sugestão de similaridade (P3-00A): confirmar aplica a entrada no
+   * produto sugerido; rejeitar aplica a um produto diferente. Mesma forma de `productEntry`
+   * (entity/action/estados), descrição própria — não é "processado por invoice".
+   */
+  productSuggestionDecided({ userId, companyId, stockId, productId, decision, previous, next }: {
+    userId?: string | undefined;
+    companyId: string;
+    stockId: string;
+    productId: string;
+    decision: 'confirmed' | 'rejected';
+    previous: ProductAuditFigures | null;
+    next: ProductAuditFigures;
+  }): AuditLogWrite {
+    return sealed({
+      action: previous ? 'UPDATE' : 'CREATE',
+      entity: 'PRODUCT',
+      entityId: productId,
+      description: decision === 'confirmed'
+        ? 'Sugestão de produto confirmada; entrada aplicada ao produto sugerido.'
+        : 'Sugestão de produto rejeitada; entrada aplicada a um produto diferente do sugerido.',
+      ...(userId && { userId }),
+      companyId,
+      stockId,
+      previousState: previous ? figures(previous) : null,
+      newState: figures(next),
+    });
+  },
+
   /** Nenhum material de senha entra aqui — só o inteiro de revogação, antes e depois. */
   userPasswordChanged({ userId, previousAuthVersion, newAuthVersion }: {
     userId: string;
