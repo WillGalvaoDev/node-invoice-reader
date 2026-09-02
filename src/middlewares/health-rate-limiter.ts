@@ -10,7 +10,6 @@ interface HealthRateLimiterOptions {
   windowMs?: number;
   max?: number;
 }
-
 export function createHealthRateLimiter({
   windowMs = HEALTH_RATE_LIMIT_POLICY.windowMs,
   max = HEALTH_RATE_LIMIT_POLICY.max,
@@ -27,4 +26,3 @@ export function createHealthRateLimiter({
     )),
   });
 }
-
