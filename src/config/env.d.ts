@@ -14,6 +14,9 @@ export declare function createEnv(environment: Environment): {
     SHUTDOWN_TIMEOUT_MS: number;
     SIMILARITY_CONFIDENCE_THRESHOLD: number;
     DANFE_MAX_ITEMS: number;
+    GEMINI_ENABLED: boolean;
+    GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
+    GEMINI_USER_REQUESTS_PER_DAY: number;
 };
 export declare const env: {
     DATABASE_URL: string;
@@ -29,6 +32,9 @@ export declare const env: {
     SHUTDOWN_TIMEOUT_MS: number;
     SIMILARITY_CONFIDENCE_THRESHOLD: number;
     DANFE_MAX_ITEMS: number;
+    GEMINI_ENABLED: boolean;
+    GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
+    GEMINI_USER_REQUESTS_PER_DAY: number;
 };
 export {};
 //# sourceMappingURL=env.d.ts.map

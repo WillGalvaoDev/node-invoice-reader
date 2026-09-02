@@ -16,6 +16,7 @@ import {
   type IAiTelemetry,
 } from '../infra/ai-telemetry.js';
 import { logger, type Logger } from '../infra/logger.js';
+import { noopAiBudgetGuard, type IAiBudgetGuard } from './ai-budget-guard.js';
 
 const RETRY_BASE_DELAY_MS = 250;
 export const GEMINI_MODEL = 'gemini-2.5-flash';
@@ -39,29 +40,43 @@ Quando nao houver evidencia suficiente, retorne matchFound=false. Retorne apenas
 export class GeminiAiProvider implements IAiProvider {
   private ai: GoogleGenAI;
   private readonly telemetry: IAiTelemetry;
+  private readonly budgetGuard: IAiBudgetGuard;
   private readonly monotonicNow: () => number;
   private readonly applicationLogger: Logger;
 
-  constructor(options: { telemetry?: IAiTelemetry; monotonicNow?: () => number; logger?: Logger } = {}) {
+  constructor(options: {
+    telemetry?: IAiTelemetry;
+    budgetGuard?: IAiBudgetGuard;
+    monotonicNow?: () => number;
+    logger?: Logger;
+  } = {}) {
     this.ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
     this.telemetry = options.telemetry ?? aiTelemetry;
+    this.budgetGuard = options.budgetGuard ?? noopAiBudgetGuard;
     this.monotonicNow = options.monotonicNow ?? (() => performance.now());
     this.applicationLogger = options.logger ?? logger;
   }
 
   private async generateContent(
     parameters: GenerateContentParameters,
+    context: IAiCallContext | undefined,
     onAttempt: () => void,
   ): Promise<GenerateContentResponse> {
+    this.budgetGuard.assertEnabled();
+    const userId = context?.userId ?? '';
     let lastError: unknown;
 
     for (let attempt = 0; attempt < env.GEMINI_MAX_ATTEMPTS; attempt++) {
       onAttempt();
+      // Fail-closed (P4-02): nenhuma chamada acontece sem reserva aceita. Uma tentativa
+      // recusada aqui nunca chega a criar o AbortController nem a tocar o provedor.
+      await this.budgetGuard.reserveAttempt(userId);
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), env.GEMINI_TIMEOUT_MS);
 
       try {
-        return await this.ai.models.generateContent({
+        const response = await this.ai.models.generateContent({
           ...parameters,
           config: {
             ...parameters.config,
@@ -72,10 +87,17 @@ export class GeminiAiProvider implements IAiProvider {
             },
           },
         });
+        const usage = this.usageFromResponse(response);
+        await this.budgetGuard.reconcileAttempt(userId, {
+          ...(usage.totalTokens !== undefined && { tokens: usage.totalTokens }),
+          ...(usage.estimatedCostUsdNanos !== undefined && { costUsdNanos: usage.estimatedCostUsdNanos }),
+        });
+        return response;
       } catch (error) {
+        await this.budgetGuard.reconcileAttempt(userId, {});
         lastError = error;
         const timedOut = controller.signal.aborted || this.isTimeoutError(error);
-        const canRetry = timedOut || this.isTransientError(error);
+        const canRetry = timedOut || this.isRetryableError(error);
 
         if (!canRetry || attempt === env.GEMINI_MAX_ATTEMPTS - 1) {
           throw this.toAppError(error, timedOut);
@@ -94,10 +116,27 @@ export class GeminiAiProvider implements IAiProvider {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
+  /** Classificação para status/telemetria (502 vs 503) — 429 permanece aqui: é indisponibilidade do provedor, não falha de protocolo. */
   private isTransientError(error: unknown): boolean {
     const status = this.errorStatus(error);
     if (status === 429 || (status !== null && status >= 500 && status <= 599)) return true;
+    return this.isNetworkLevelTransient(error);
+  }
 
+  /**
+   * Decisão de retry (P4-02, critério 11). Difere de `isTransientError` num único ponto:
+   * **429 nunca repete**. Não há forma confiável de distinguir, no corpo/status da resposta,
+   * throttling de janela curta (retry ajudaria) de cota diária esgotada (retry só queima mais
+   * uma requisição da cota compartilhada). Comportamento conservador registrado na tarefa:
+   * nunca repetir 429, custo aceito é perder o retry legítimo de throttling de curta janela.
+   */
+  private isRetryableError(error: unknown): boolean {
+    const status = this.errorStatus(error);
+    if (status !== null && status >= 500 && status <= 599) return true;
+    return this.isNetworkLevelTransient(error);
+  }
+
+  private isNetworkLevelTransient(error: unknown): boolean {
     if (!(error instanceof Error)) return false;
     const retryableCodes = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH']);
     const code = 'code' in error && typeof error.code === 'string' ? error.code : null;
@@ -131,6 +170,29 @@ export class GeminiAiProvider implements IAiProvider {
     return 'unknown';
   }
 
+  /** Fonte única de extração de uso — reusada pela telemetria (P3-01) e pela reconciliação do orçamento (P4-02). */
+  private usageFromResponse(response?: GenerateContentResponse): {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    estimatedCostUsdNanos?: number;
+  } {
+    const usage = response?.usageMetadata;
+    const inputTokens = usage?.promptTokenCount;
+    const outputTokens = usage?.candidatesTokenCount === undefined && usage?.thoughtsTokenCount === undefined
+      ? undefined
+      : (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
+    const estimatedCostUsdNanos = inputTokens !== undefined && outputTokens !== undefined
+      ? calculateGeminiCostUsdNanos(GEMINI_MODEL, inputTokens, outputTokens)
+      : undefined;
+    return {
+      ...(inputTokens !== undefined && { inputTokens }),
+      ...(outputTokens !== undefined && { outputTokens }),
+      ...(usage?.totalTokenCount !== undefined && { totalTokens: usage.totalTokenCount }),
+      ...(estimatedCostUsdNanos !== undefined && { estimatedCostUsdNanos }),
+    };
+  }
+
   private async recordCall(
     operation: AiOperation,
     status: 'success' | 'failure',
@@ -140,14 +202,7 @@ export class GeminiAiProvider implements IAiProvider {
     failureCategory?: AiFailureCategory,
     context?: IAiCallContext,
   ): Promise<void> {
-    const usage = response?.usageMetadata;
-    const inputTokens = usage?.promptTokenCount;
-    const outputTokens = usage?.candidatesTokenCount === undefined && usage?.thoughtsTokenCount === undefined
-      ? undefined
-      : (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
-    const estimatedCostUsdNanos = inputTokens !== undefined && outputTokens !== undefined
-      ? calculateGeminiCostUsdNanos(GEMINI_MODEL, inputTokens, outputTokens)
-      : undefined;
+    const { inputTokens, outputTokens, totalTokens, estimatedCostUsdNanos } = this.usageFromResponse(response);
     const event = {
       operation,
       ...(context?.requestId && { requestId: context.requestId }),
@@ -159,7 +214,7 @@ export class GeminiAiProvider implements IAiProvider {
       attempts,
       ...(inputTokens !== undefined && { inputTokens }),
       ...(outputTokens !== undefined && { outputTokens }),
-      ...(usage?.totalTokenCount !== undefined && { totalTokens: usage.totalTokenCount }),
+      ...(totalTokens !== undefined && { totalTokens }),
       ...(estimatedCostUsdNanos !== undefined && { estimatedCostUsdNanos }),
       ...(failureCategory && { failureCategory }),
       ...(context?.userId && { userId: context.userId }),
@@ -278,7 +333,7 @@ export class GeminiAiProvider implements IAiProvider {
           responseMimeType: 'application/json',
           responseSchema: responseSchema,
         },
-      }, () => { attempts += 1; });
+      }, context, () => { attempts += 1; });
       const parsed = this.parseDanfeResponse(response.text);
       await this.recordCall('invoice_extraction', 'success', startedAt, attempts, response, undefined, context);
       return parsed;
@@ -338,7 +393,7 @@ export class GeminiAiProvider implements IAiProvider {
           responseMimeType: 'application/json',
           responseSchema: responseSchema,
         }
-      }, () => { attempts += 1; });
+      }, context, () => { attempts += 1; });
 
       const parsed = this.parseSimilarityResponse(response.text);
       await this.recordCall('product_similarity', 'success', startedAt, attempts, response, undefined, context);

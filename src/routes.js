@@ -7,8 +7,10 @@ import { ReadInvoiceUseCase } from './use-cases/read-invoice/read-invoice.use-ca
 import { PrismaProductRepository } from './repositories/prisma-product.repository.js';
 import { PrismaAuditLogRepository } from './repositories/prisma-audit-log.repository.js';
 import { DiskStorageProvider } from './providers/implementations/disk-storage.provider.js';
-import { GeminiAiProvider } from './providers/gemini-ai.provider.js';
+import { GeminiAiProvider, GEMINI_MODEL } from './providers/gemini-ai.provider.js';
 import { PrismaAiTelemetry } from './infra/prisma-ai-telemetry.js';
+import { AiBudgetGuard } from './providers/ai-budget-guard.js';
+import { PrismaAiUsageLedgerRepository } from './repositories/prisma-ai-usage-ledger.repository.js';
 import { RegisterUserUseCase } from './use-cases/register-user/register-user.use-case.js';
 import { PrismaUserRepository } from './repositories/prisma-user.repository.js';
 import { Argon2HashProvider } from './providers/implementations/argon2-hash.provider.js';
@@ -61,7 +63,9 @@ export function createRoutes(options) {
 }
 // Injeção - Compartilhados / Repositórios
 const storageProvider = new DiskStorageProvider();
-const aiProvider = new GeminiAiProvider({ telemetry: new PrismaAiTelemetry() });
+const aiUsageLedgerRepository = new PrismaAiUsageLedgerRepository();
+const aiBudgetGuard = new AiBudgetGuard(aiUsageLedgerRepository, GEMINI_MODEL);
+const aiProvider = new GeminiAiProvider({ telemetry: new PrismaAiTelemetry(), budgetGuard: aiBudgetGuard });
 const productRepository = new PrismaProductRepository();
 const auditLogRepository = new PrismaAuditLogRepository();
 const stockRepository = new PrismaStockRepository();

@@ -24,6 +24,7 @@ Nunca use `DONE`/`APPROVED` para uma decisão que foi conscientemente adiada —
 | [D5](#d5--coorte-do-piloto) | Teto de 200 usuários cadastrados (não meta) | **APPROVED** | P6-01, P6-02 | — |
 | [D6](#d6--janela-do-piloto) | Janela de 4 semanas | **APPROVED** | P6-01, P6-02 | — |
 | [D7](#d7--retenção-de-auditlog-durante-o-piloto) | `AuditLog`: sem purga automática durante o piloto | **APPROVED** (política do piloto) / **DEFERRED_WITH_GATE** (prazo legal/comercial definitivo) | — (mantém comportamento atual) | Comercialização, até parecer jurídico |
+| [D8](#d8--tetos-internos-de-requisições-do-modo-a-p4-02) | Modo A: 18 requests/dia (global) e 5/dia (por usuário); tokens **deliberadamente sem teto** | **APPROVED** (requests) / **DEFERRED_WITH_GATE** (teto de tokens, por ausência de dado empírico) | P4-02 | Modo B (custo) segue bloqueado; teto de tokens aguarda telemetria real do piloto |
 
 ---
 
@@ -143,6 +144,51 @@ Nunca use `DONE`/`APPROVED` para uma decisão que foi conscientemente adiada —
 
 ---
 
+## D8 — Tetos internos de requisições do Modo A (P4-02)
+
+- **Status:** APPROVED (tetos de requisições) / **DEFERRED_WITH_GATE** (teto de tokens).
+- **Data:** 2026-09-03.
+- **Responsável:** Project Owner / responsável humano pelo piloto.
+
+**Evidência humana do Google AI Studio, registrada sem interpretação:**
+
+| Item | Valor observado |
+|---|---|
+| Projeto | Default Gemini Project |
+| Tier | Nível gratuito |
+| Modelo | `gemini-2.5-flash` |
+| RPM | 5 requisições/minuto |
+| TPM | 250.000 tokens de entrada/minuto |
+| RPD | 20 requisições/dia |
+| TPD | **Não apresentado/publicado na tela do AI Studio.** |
+
+**Interpretação registrada sobre a ausência de TPD — explícita, para nunca ser reaberta por engano:** a ausência de um valor de TPD na tela do AI Studio **não** significa zero, não significa ilimitado, e não é `TPM × 60 × 24` nem qualquer outro número derivado. É, simplesmente, um dado que o provedor não publica nessa tela. Nenhum desses valores foi inferido.
+
+**Decisão — requisições/dia (Modo A, `docs/pilot-readiness-roadmap.md`, P4-02):**
+- **Teto global: 18 requisições/dia.** O teto global **sempre prevalece** sobre qualquer teto por usuário.
+- **Teto por usuário: 5 requisições/dia.** É um mecanismo **anti-monopolização** — impede que um único usuário consuma sozinho a cota compartilhada — e **não** é uma reserva nem uma garantia individual. Em particular: o teto de coorte de até 200 usuários registrados (D5) **não** implica `5 × 200` requisições disponíveis; a autoridade final é sempre o teto global de 18/dia.
+- Ambos os valores são deliberadamente **inferiores** à cota real do provedor (RPD=20): a aplicação recusa antes que o provedor recuse.
+
+**Decisão — tokens: SEM teto interno nesta primeira configuração do Modo A. Deliberado, não uma omissão.**
+
+Motivo, registrado explicitamente para não ser confundido com esquecimento: não existe, hoje, base empírica suficiente para escolher um `GLOBAL_TOKENS_PER_DAY`/`USER_TOKENS_PER_DAY` responsável. Investigação read-only confirmou, antes desta decisão:
+- o piloto ainda não começou (nenhuma coorte real gerando tráfego);
+- os únicos dados já persistidos em `ai_call_events` são sintéticos (fixtures do gate de integração) ou foram descartados junto com o container Docker efêmero ao final de cada execução;
+- o AI Studio fornece TPM (por minuto) para `gemini-2.5-flash`, mas **não** fornece um TPD (por dia) equivalente — não há de onde derivar um teto diário de tokens sem inventar uma fórmula de conversão que ninguém aprovou.
+
+Consequência técnica, não uma segunda decisão pendente: o mecanismo do ledger (`ai_usage_ledger`, P4-02) já foi desenhado para que **um teto ausente signifique "sem limite nesta dimensão"**, não zero e não infinito por acidente de código. Tokens continuam sendo **observados** — `ai_call_events` (P3-01) já captura `inputTokens`/`outputTokens`/`totalTokens`/`estimatedCostUsdNanos` reais de cada chamada, e o próprio `ai_usage_ledger` acumula `spentTokens`/`spentCostUsdNanos` desde já, sem teto configurado — para que, quando houver telemetria real do piloto, a decisão do teto de tokens seja tomada com dado, não com uma fórmula inventada agora.
+
+**Explicitamente fora desta decisão:**
+- Qualquer valor de `GLOBAL_TOKENS_PER_DAY`/`USER_TOKENS_PER_DAY` — nenhum foi fixado, nenhum foi derivado de TPM.
+- Modo B (Paid Tier comercial) — permanece bloqueado por D4, sem relação com esta decisão. **Os valores 18/5 não devem ser reutilizados como política comercial** caso o Modo B seja decidido no futuro; são calibrados especificamente contra a cota gratuita do projeto de desenvolvimento.
+- RPM (5) e TPM (250.000) são constraints **externas do provedor**, não tetos internos — a aplicação não os replica como configuração própria; eles seguem relevantes apenas para a política de retry (não repetir `429`, já registrada na tarefa).
+
+**Destrava:** implementação de P4-02 (Modo A completo: tetos de requisições, kill switch, fail-closed, tokens observados sem teto).
+**Bloqueia:** nada no piloto — Modo A está completo com esta decisão. Modo B (custo) e um futuro teto de tokens continuam **DEFERRED_WITH_GATE**, cada um aguardando sua própria evidência.
+**Condição de revisão:** teto de tokens revisitado com dado real de `ai_call_events`/`ai_usage_ledger` do próprio piloto (P3-04, P6-02/P6-03); tetos de requisições (18/5) revisitados se o volume real do piloto (P6-02) sugerir recalibração.
+
+---
+
 ## Decisões que permanecem fora deste documento
 
-Nenhuma decisão além de D1–D7 foi solicitada ou tomada nesta sessão. Qualquer outra "decisão humana" ainda referenciada no roadmap (`docs/pilot-readiness-roadmap.md`) que não apareça acima continua **aberta**, e não foi resolvida por inferência — ver o relatório de fechamento de P0-01 para a lista exata verificada contra os critérios do roadmap.
+D1–D7 foram tomadas em 2026-08-28 (fechamento de P0-01); D8 foi tomada em 2026-09-03 (evidência real do Google AI Studio para `gemini-2.5-flash`, destravando P4-02 Modo A). Nenhuma outra decisão foi solicitada ou tomada. Qualquer outra "decisão humana" ainda referenciada no roadmap (`docs/pilot-readiness-roadmap.md`) que não apareça acima continua **aberta**, e não foi resolvida por inferência — ver o relatório de fechamento de P0-01 para a lista exata verificada contra os critérios do roadmap.

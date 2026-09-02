@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { calculateGeminiCostUsdNanos, confidenceBucket, createAiTelemetry, recordAiTelemetryBestEffort, } from './ai-telemetry.js';
+import { calculateGeminiCostUsdNanos, confidenceBucket, createAiTelemetry, hasPricingFor, recordAiTelemetryBestEffort, } from './ai-telemetry.js';
 describe('AI telemetry', () => {
     it.each([
         [0, 0, 0],
@@ -11,6 +11,10 @@ describe('AI telemetry', () => {
     });
     it('torna pricing desconhecido explicitamente indisponível', () => {
         expect(calculateGeminiCostUsdNanos('unknown-model', 100, 100)).toBeUndefined();
+    });
+    it('hasPricingFor reflete exatamente as entradas de MODEL_PRICING', () => {
+        expect(hasPricingFor('gemini-2.5-flash')).toBe(true);
+        expect(hasPricingFor('modelo-inexistente')).toBe(false);
     });
     it.each([
         [0, '0.00-0.49'], [0.49, '0.00-0.49'], [0.5, '0.50-0.69'],

@@ -54,6 +54,11 @@ const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
   },
 };
 
+/** Fail-closed do guard de orçamento (P4-02): um modelo sem preço não deve ser chamado. */
+export function hasPricingFor(model: string): boolean {
+  return model in MODEL_PRICING;
+}
+
 export function calculateGeminiCostUsdNanos(
   model: string,
   inputTokens: number,

@@ -1,0 +1,1 @@
+{"version":3,"file":"gemini-quota-exceeded.error.d.ts","sourceRoot":"","sources":["gemini-quota-exceeded.error.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,QAAQ,EAAE,MAAM,gBAAgB,CAAC;AAC1C,OAAO,KAAK,EAAE,kBAAkB,EAAE,MAAM,+CAA+C,CAAC;AAExF;;;;;GAKG;AACH,qBAAa,wBAAyB,SAAQ,QAAQ;aACxB,KAAK,EAAE,kBAAkB;aAAkB,iBAAiB,EAAE,MAAM;gBAApE,KAAK,EAAE,kBAAkB,EAAkB,iBAAiB,EAAE,MAAM;CASjG"}

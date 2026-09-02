@@ -229,3 +229,30 @@ model AiCallEvent {
   @@index([operation, createdAt])
   @@map("ai_call_events")
 }
+
+// P4-02 (D8): registro autoritativo que decide se uma chamada ao Gemini pode acontecer —
+// escrita forte, fail-closed, nunca best-effort (contrato oposto de ai_call_events).
+// scope 'global' usa scopeId = 'global' (sentinela); scope 'user' usa scopeId = userId.
+// periodKind hoje só usa 'day' (Modo A); 'month' fica reservado para o Modo B (custo).
+// reservedTokens/spentTokens e reservedCostUsdNanos/spentCostUsdNanos acumulam desde já
+// (mesmo padrão já usado para custo em ai_call_events): sem teto configurado nesta
+// primeira versão do Modo A (D8 — ausência deliberada de dado empírico para TPD), só
+// observação. Nenhuma leitura de ai_call_events participa desta decisão (P4-02 não
+// depende de P3-01) — a única fonte de verdade aqui é esta própria tabela.
+model AiUsageLedger {
+  id                   String   @id @default(uuid())
+  scope                String
+  scopeId              String
+  periodKind           String
+  period               String
+  reservedRequests     Int      @default(0)
+  spentRequests        Int      @default(0)
+  reservedTokens       Int      @default(0)
+  spentTokens          Int      @default(0)
+  reservedCostUsdNanos Int      @default(0)
+  spentCostUsdNanos    Int      @default(0)
+  updatedAt            DateTime @updatedAt
+
+  @@unique([scope, scopeId, periodKind, period])
+  @@map("ai_usage_ledger")
+}

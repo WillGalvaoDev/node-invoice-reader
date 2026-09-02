@@ -7,6 +7,10 @@ const MODEL_PRICING = {
         outputUsdNanosPerToken: 2_500,
     },
 };
+/** Fail-closed do guard de orçamento (P4-02): um modelo sem preço não deve ser chamado. */
+export function hasPricingFor(model) {
+    return model in MODEL_PRICING;
+}
 export function calculateGeminiCostUsdNanos(model, inputTokens, outputTokens) {
     const pricing = MODEL_PRICING[model];
     if (!pricing)

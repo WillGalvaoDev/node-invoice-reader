@@ -41,6 +41,9 @@ describe('configuração da aplicação', () => {
             SHUTDOWN_TIMEOUT_MS: 30_000,
             SIMILARITY_CONFIDENCE_THRESHOLD: 0.7,
             DANFE_MAX_ITEMS: 100,
+            GEMINI_ENABLED: true,
+            GEMINI_GLOBAL_REQUESTS_PER_DAY: 18,
+            GEMINI_USER_REQUESTS_PER_DAY: 5,
         });
     });
     it('valida os limites operacionais de request e shutdown', async () => {
@@ -237,6 +240,42 @@ describe('configuração da aplicação', () => {
             }
             expect(thrown).toBeInstanceOf(Error);
             expect(thrown.message).not.toContain(shortCode);
+        });
+    });
+    describe('P4-02 (D8): kill switch e tetos internos de requisições/dia', () => {
+        const required = {
+            DATABASE_URL: 'postgresql://localhost/docscan',
+            JWT_SECRET: VALID_JWT_SECRET,
+            GEMINI_API_KEY: 'gemini-key',
+            INVITE_CODE: VALID_INVITE_CODE,
+        };
+        it('GEMINI_ENABLED default true; aceita "true"/"false"; rejeita qualquer outro valor', async () => {
+            const { createEnv } = await import('./env.js');
+            expect(createEnv(required).GEMINI_ENABLED).toBe(true);
+            expect(createEnv({ ...required, GEMINI_ENABLED: 'false' }).GEMINI_ENABLED).toBe(false);
+            expect(createEnv({ ...required, GEMINI_ENABLED: 'true' }).GEMINI_ENABLED).toBe(true);
+            expect(() => createEnv({ ...required, GEMINI_ENABLED: '0' })).toThrow('Variável de ambiente inválida: GEMINI_ENABLED');
+            expect(() => createEnv({ ...required, GEMINI_ENABLED: 'yes' })).toThrow('Variável de ambiente inválida: GEMINI_ENABLED');
+        });
+        it('GEMINI_GLOBAL_REQUESTS_PER_DAY default 18 (D8); faixa 1–20 (nunca ≥ RPD real de 20)', async () => {
+            const { createEnv } = await import('./env.js');
+            expect(createEnv(required).GEMINI_GLOBAL_REQUESTS_PER_DAY).toBe(18);
+            expect(createEnv({ ...required, GEMINI_GLOBAL_REQUESTS_PER_DAY: '20' }).GEMINI_GLOBAL_REQUESTS_PER_DAY).toBe(20);
+            expect(() => createEnv({ ...required, GEMINI_GLOBAL_REQUESTS_PER_DAY: '21' })).toThrow('GEMINI_GLOBAL_REQUESTS_PER_DAY');
+            expect(() => createEnv({ ...required, GEMINI_GLOBAL_REQUESTS_PER_DAY: '0' })).toThrow('GEMINI_GLOBAL_REQUESTS_PER_DAY');
+        });
+        it('GEMINI_USER_REQUESTS_PER_DAY default 5 (D8); faixa 1–20', async () => {
+            const { createEnv } = await import('./env.js');
+            expect(createEnv(required).GEMINI_USER_REQUESTS_PER_DAY).toBe(5);
+            expect(createEnv({ ...required, GEMINI_USER_REQUESTS_PER_DAY: '20' }).GEMINI_USER_REQUESTS_PER_DAY).toBe(20);
+            expect(() => createEnv({ ...required, GEMINI_USER_REQUESTS_PER_DAY: '21' })).toThrow('GEMINI_USER_REQUESTS_PER_DAY');
+            expect(() => createEnv({ ...required, GEMINI_USER_REQUESTS_PER_DAY: '0' })).toThrow('GEMINI_USER_REQUESTS_PER_DAY');
+        });
+        it('nenhuma variável de teto de tokens existe — ausência de TPD não pode ser derivada (D8)', async () => {
+            const { createEnv } = await import('./env.js');
+            const config = createEnv(required);
+            expect(config).not.toHaveProperty('GEMINI_GLOBAL_TOKENS_PER_DAY');
+            expect(config).not.toHaveProperty('GEMINI_USER_TOKENS_PER_DAY');
         });
     });
 });

@@ -49,6 +49,15 @@ function parseDecimalInRange(value, defaultValue, name, minimum, maximum) {
     }
     return parsed;
 }
+function parseBoolean(value, defaultValue, name) {
+    if (value === undefined || value.trim() === '')
+        return defaultValue;
+    if (value === 'true')
+        return true;
+    if (value === 'false')
+        return false;
+    throw new Error(`Variável de ambiente inválida: ${name}`);
+}
 function parseCorsAllowedOrigins(value) {
     if (value === undefined || value.trim() === '')
         return [];
@@ -90,6 +99,14 @@ export function createEnv(environment) {
         // Teto operacional do piloto (D1, docs/pilot-decisions.md), não regra fiscal.
         // Fonte única: mesmo valor usado no maxItems do prompt e na validação do schema (P4-01).
         DANFE_MAX_ITEMS: parseIntegerInRange(environment.DANFE_MAX_ITEMS, 100, 'DANFE_MAX_ITEMS', 1, 1000),
+        // Kill switch do guard de orçamento (P4-02, D8): separado do teto — desligar não é "sem cota".
+        GEMINI_ENABLED: parseBoolean(environment.GEMINI_ENABLED, true, 'GEMINI_ENABLED'),
+        // Tetos internos de requisições/dia do Modo A (P4-02, D8) — deliberadamente abaixo da
+        // cota real do provedor (RPD=20 para gemini-2.5-flash, lida no AI Studio em 2026-09-02),
+        // nunca igual ou acima dela. Defaults refletem a decisão humana; a faixa de validação
+        // (máximo 20) impede configurar um teto que anularia a proteção.
+        GEMINI_GLOBAL_REQUESTS_PER_DAY: parseIntegerInRange(environment.GEMINI_GLOBAL_REQUESTS_PER_DAY, 18, 'GEMINI_GLOBAL_REQUESTS_PER_DAY', 1, 20),
+        GEMINI_USER_REQUESTS_PER_DAY: parseIntegerInRange(environment.GEMINI_USER_REQUESTS_PER_DAY, 5, 'GEMINI_USER_REQUESTS_PER_DAY', 1, 20),
     };
 }
 export const env = createEnv(process.env);

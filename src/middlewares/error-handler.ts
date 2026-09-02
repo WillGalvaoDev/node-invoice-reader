@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { AppError } from '../errors/app-error.js';
+import { GeminiQuotaExceededError } from '../errors/gemini-quota-exceeded.error.js';
 import multer from 'multer';
 import { logger as applicationLogger, type Logger } from '../infra/logger.js';
 
@@ -14,6 +15,14 @@ export function createErrorHandler(logger: Logger) {
       return response.status(413).json({
         status: 'error',
         message: 'Arquivo excede o limite de 10 MiB.',
+      });
+    }
+
+    if (error instanceof GeminiQuotaExceededError) {
+      response.set('Retry-After', String(error.retryAfterSeconds));
+      return response.status(error.statusCode).json({
+        status: 'error',
+        message: error.message,
       });
     }
 

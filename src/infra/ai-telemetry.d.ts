@@ -29,6 +29,8 @@ export interface IAiTelemetry {
     recordCall(event: AiCallTelemetryEvent): void | Promise<void>;
     recordSuggestion(event: AiSuggestionTelemetryEvent): void;
 }
+/** Fail-closed do guard de orçamento (P4-02): um modelo sem preço não deve ser chamado. */
+export declare function hasPricingFor(model: string): boolean;
 export declare function calculateGeminiCostUsdNanos(model: string, inputTokens: number, outputTokens: number): number | undefined;
 export declare function confidenceBucket(confidence: number): ConfidenceBucket;
 export declare function createAiTelemetry({ logger: applicationLogger }?: {

@@ -9,12 +9,17 @@ vi.mock('../config/env.js', () => ({
   env: { GEMINI_API_KEY: 'test-key', GEMINI_TIMEOUT_MS: 1_000, GEMINI_MAX_ATTEMPTS: 2, SIMILARITY_CONFIDENCE_THRESHOLD: 0.7, DANFE_MAX_ITEMS: 100 },
 }));
 
-const { GeminiAiProvider } = await import('./gemini-ai.provider.js');
+const { GeminiAiProvider, GEMINI_MODEL } = await import('./gemini-ai.provider.js');
 const { env } = await import('../config/env.js');
+const { hasPricingFor } = await import('../infra/ai-telemetry.js');
 
 const fileContent = Buffer.from('document');
 
 describe('GeminiAiProvider file MIME', () => {
+  it('P4-02 (critério 5): o GEMINI_MODEL corrente tem entrada de preço — fail-closed do guard depende disto', () => {
+    expect(hasPricingFor(GEMINI_MODEL)).toBe(true);
+  });
+
   const validDanfe = {
     accessKey: '1'.repeat(44), invoiceNumber: '1', series: '1', issuedAt: '2026-01-01', totalValue: 10,
     supplier: { cnpj: '11222333000181', name: 'Supplier' },
@@ -80,7 +85,7 @@ describe('GeminiAiProvider file MIME', () => {
     expect(observedSignals.every((signal) => signal.aborted)).toBe(true);
   });
 
-  it.each([429, 500, 503])('repete status transitório %s e retorna o sucesso posterior', async (status) => {
+  it.each([500, 503])('repete status transitório %s e retorna o sucesso posterior', async (status) => {
     vi.useFakeTimers();
     generateContent
       .mockRejectedValueOnce({ status, message: 'upstream detail' })
@@ -91,6 +96,14 @@ describe('GeminiAiProvider file MIME', () => {
 
     await expect(pending).resolves.toMatchObject({ accessKey: validDanfe.accessKey });
     expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('P4-02 (critério 11): nunca repete 429 — cota do provedor, não throttling de janela curta, classificado como indisponível', async () => {
+    generateContent.mockRejectedValueOnce({ status: 429, message: 'upstream detail' });
+
+    await expect(new GeminiAiProvider().extractDanfeData(fileContent, 'image/png'))
+      .rejects.toMatchObject({ statusCode: 503 });
+    expect(generateContent).toHaveBeenCalledOnce();
   });
 
   it('respeita o limite de tentativas para falha transitória', async () => {
