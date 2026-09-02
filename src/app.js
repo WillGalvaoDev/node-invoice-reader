@@ -4,6 +4,7 @@ import { configureTrustProxy } from './config/trust-proxy.js';
 import { requestIdMiddleware } from './middlewares/request-id.js';
 import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
 import { createErrorHandler } from './middlewares/error-handler.js';
+import { createHealthRateLimiter } from './middlewares/health-rate-limiter.js';
 export function createOperationalState() {
     let shuttingDown = false;
     return {
@@ -11,17 +12,31 @@ export function createOperationalState() {
         beginShutdown: () => { shuttingDown = true; },
     };
 }
-export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], }) {
+export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), }) {
     const app = express();
+    let healthyUntil = 0;
+    let pendingHealthProbe;
+    const cachedHealthProbe = async () => {
+        if (Date.now() < healthyUntil)
+            return;
+        pendingHealthProbe ??= healthProbe()
+            .then(() => { healthyUntil = Date.now() + healthCacheTtlMs; })
+            .finally(() => { pendingHealthProbe = undefined; });
+        await pendingHealthProbe;
+    };
     configureTrustProxy(app, trustProxyHops);
     app.use(requestIdMiddleware);
     app.use(...createHttpSecurityMiddlewares(allowedOrigins));
-    app.get('/health', async (_request, response) => {
+    const rejectHealthDuringShutdown = (_request, response, next) => {
         if (operationalState.isShuttingDown()) {
-            return response.status(503).json({ status: 'unavailable' });
+            response.status(503).json({ status: 'unavailable' });
+            return;
         }
+        next();
+    };
+    app.get('/health', rejectHealthDuringShutdown, healthRateLimiter, async (_request, response) => {
         try {
-            await healthProbe();
+            await cachedHealthProbe();
             return response.status(200).json({ status: 'ok' });
         }
         catch (error) {

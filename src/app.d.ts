@@ -12,7 +12,9 @@ interface CreateAppOptions {
     logger?: Logger;
     trustProxyHops?: number;
     allowedOrigins?: readonly string[];
+    healthCacheTtlMs?: number;
+    healthRateLimiter?: RequestHandler;
 }
-export declare function createApp({ applicationRoutes, healthProbe, operationalState, logger, trustProxyHops, allowedOrigins, }: CreateAppOptions): import("express-serve-static-core").Express;
+export declare function createApp({ applicationRoutes, healthProbe, operationalState, logger, trustProxyHops, allowedOrigins, healthCacheTtlMs, healthRateLimiter, }: CreateAppOptions): import("express-serve-static-core").Express;
 export {};
 //# sourceMappingURL=app.d.ts.map

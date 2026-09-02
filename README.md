@@ -42,7 +42,7 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 
 | Método | Rota | Autenticação | Descrição |
 |---|---|---|---|
-| `GET`  | `/health` | pública | `SELECT 1` real no Postgres; `503` se o banco estiver indisponível ou o processo em shutdown. |
+| `GET`  | `/health` | pública | `SELECT 1` real no Postgres; sucesso em cache por 5 s; limite de 60/IP/min; `503` se o banco estiver indisponível ou o processo em shutdown. |
 | `POST` | `/users` | pública, rate limit 5/hora por IP | Cadastro de usuário. Exige `inviteCode` correto (coorte controlada do piloto); ausente ou incorreto devolve o mesmo `403` genérico. Senha com Argon2. |
 | `POST` | `/login` | pública, rate limit 10/15min por IP | Autenticação; devolve JWT. |
 | `POST` | `/companies` | Bearer JWT, rate limit 5/min por usuário | Cria empresa + estoque principal em uma transação atômica. |
@@ -113,6 +113,7 @@ Um único `PrismaClient`/`Pool` (`src/infra/prisma.ts`, `max: 10`) compartilhado
 ### Operação
 
 * **Graceful shutdown**: `SIGTERM`/`SIGINT` drenam requisições em voo, encerram o pool do Postgres e saem com código 0; timeout configurável força o fechamento e sai com código 1.
+* **Healthcheck protegido**: respostas saudáveis reutilizam por 5 s o resultado do `SELECT 1` e requisições são limitadas a 60/IP/min. Falhas nunca entram no cache, permitindo detectar recuperação imediatamente; o estado de shutdown sempre responde `503` sem consultar o banco.
 * **`unhandledRejection`/`uncaughtException`** são logados com contexto seguro e disparam o mesmo shutdown fatal.
 * **CI** (`.github/workflows/ci.yml`, GitHub Actions, `ubuntu-latest`): `prisma validate` → `prisma generate` → `typecheck` → `lint` → `build` → **guard de artefatos** (`npm run verify:artifacts`, falha se o build sujar o checkout) → suíte unitária → gate de integração PostgreSQL real (Docker); job separado valida o build de produção com **apenas** `dependencies` instaladas (`npm prune --omit=dev`) e roda `scripts/verify-production-runtime.mjs`, que importa o grafo de dependências real do artefato compilado.
 
