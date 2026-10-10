@@ -17,10 +17,16 @@ export interface AiAttemptOutcome {
   costUsdNanos?: number;
 }
 
+/** Contexto por tentativa, sem estado compartilhado entre chamadas concorrentes. */
+export interface AiAttemptReservation {
+  readonly userId: string;
+  readonly reservedAt: string;
+}
+
 export interface IAiBudgetGuard {
   assertEnabled(): void;
-  reserveAttempt(userId: string): Promise<void>;
-  reconcileAttempt(userId: string, outcome: AiAttemptOutcome): Promise<void>;
+  reserveAttempt(userId: string): Promise<AiAttemptReservation>;
+  reconcileAttempt(reservation: AiAttemptReservation, outcome: AiAttemptOutcome): Promise<void>;
 }
 
 /**
@@ -51,7 +57,7 @@ export class AiBudgetGuard implements IAiBudgetGuard {
   }
 
   /** Reserva uma tentativa (global + usuário). Lança se recusado — o Gemini nunca é chamado. */
-  async reserveAttempt(userId: string): Promise<void> {
+  async reserveAttempt(userId: string): Promise<AiAttemptReservation> {
     const now = this.now();
     const reservation = await this.ledger.reserveRequest(userId, now).catch((error: unknown) => {
       this.applicationLogger.error('AI usage ledger reservation failed', {
@@ -68,6 +74,7 @@ export class AiBudgetGuard implements IAiBudgetGuard {
       });
       throw new GeminiQuotaExceededError(reservation.rejectedScope, retryAfterSeconds);
     }
+    return { userId, reservedAt: now.toISOString() };
   }
 
   /**
@@ -75,9 +82,9 @@ export class AiBudgetGuard implements IAiBudgetGuard {
    * aconteceu (sucesso ou falha); uma falha nesta contabilização não pode descartar um
    * resultado já obtido. Diferente de `reserveAttempt`, que é sempre fail-closed.
    */
-  async reconcileAttempt(userId: string, outcome: AiAttemptOutcome): Promise<void> {
+  async reconcileAttempt(reservation: AiAttemptReservation, outcome: AiAttemptOutcome): Promise<void> {
     try {
-      await this.ledger.reconcileRequest(userId, this.now(), outcome);
+      await this.ledger.reconcileRequest(reservation.userId, new Date(reservation.reservedAt), outcome);
     } catch (error) {
       this.applicationLogger.error('AI usage ledger reconciliation failed', {
         event: 'ai_budget_reconciliation_failure',
@@ -95,6 +102,6 @@ export class AiBudgetGuard implements IAiBudgetGuard {
  */
 export const noopAiBudgetGuard: IAiBudgetGuard = {
   assertEnabled() {},
-  async reserveAttempt() {},
+  async reserveAttempt(userId) { return { userId, reservedAt: new Date().toISOString() }; },
   async reconcileAttempt() {},
 };

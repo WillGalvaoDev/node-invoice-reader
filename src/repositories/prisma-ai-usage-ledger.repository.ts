@@ -33,7 +33,7 @@ export class PrismaAiUsageLedgerRepository implements IAiUsageLedgerRepository {
           create: { scope: 'global', scopeId: GLOBAL_SCOPE_ID, periodKind: PERIOD_KIND_DAY, period, reservedRequests: 1 },
           update: { reservedRequests: { increment: 1 } },
         });
-        if (global.reservedRequests + global.spentRequests > env.GEMINI_GLOBAL_REQUESTS_PER_DAY) {
+        if (env.GEMINI_QUOTA_ENFORCEMENT_ENABLED && global.reservedRequests + global.spentRequests > env.GEMINI_GLOBAL_REQUESTS_PER_DAY) {
           throw new LedgerCapExceeded('global');
         }
 
@@ -42,7 +42,7 @@ export class PrismaAiUsageLedgerRepository implements IAiUsageLedgerRepository {
           create: { scope: 'user', scopeId: userId, periodKind: PERIOD_KIND_DAY, period, reservedRequests: 1 },
           update: { reservedRequests: { increment: 1 } },
         });
-        if (user.reservedRequests + user.spentRequests > env.GEMINI_USER_REQUESTS_PER_DAY) {
+        if (env.GEMINI_QUOTA_ENFORCEMENT_ENABLED && user.reservedRequests + user.spentRequests > env.GEMINI_USER_REQUESTS_PER_DAY) {
           throw new LedgerCapExceeded('user');
         }
       });

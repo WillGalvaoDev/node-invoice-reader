@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { AppError } from '../errors/app-error.js';
+import { GeminiProviderRateLimitError } from '../errors/gemini-provider-rate-limit.error.js';
 import { env } from '../config/env.js';
 import { isDanfeMimeType } from '../config/upload.js';
 import { createDanfeResponseSchema, similarityResponseSchema } from '../schemas/gemini.schemas.js';
@@ -44,7 +45,7 @@ export class GeminiAiProvider {
             onAttempt();
             // Fail-closed (P4-02): nenhuma chamada acontece sem reserva aceita. Uma tentativa
             // recusada aqui nunca chega a criar o AbortController nem a tocar o provedor.
-            await this.budgetGuard.reserveAttempt(userId);
+            const reservation = await this.budgetGuard.reserveAttempt(userId);
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), env.GEMINI_TIMEOUT_MS);
             try {
@@ -60,14 +61,14 @@ export class GeminiAiProvider {
                     },
                 });
                 const usage = this.usageFromResponse(response);
-                await this.budgetGuard.reconcileAttempt(userId, {
+                await this.budgetGuard.reconcileAttempt(reservation, {
                     ...(usage.totalTokens !== undefined && { tokens: usage.totalTokens }),
                     ...(usage.estimatedCostUsdNanos !== undefined && { costUsdNanos: usage.estimatedCostUsdNanos }),
                 });
                 return response;
             }
             catch (error) {
-                await this.budgetGuard.reconcileAttempt(userId, {});
+                await this.budgetGuard.reconcileAttempt(reservation, {});
                 lastError = error;
                 const timedOut = controller.signal.aborted || this.isTimeoutError(error);
                 const canRetry = timedOut || this.isRetryableError(error);
@@ -123,6 +124,8 @@ export class GeminiAiProvider {
             : null;
     }
     toAppError(error, timedOut) {
+        if (this.errorStatus(error) === 429)
+            return new GeminiProviderRateLimitError();
         if (timedOut)
             return new AppError('O serviço de IA excedeu o tempo limite.', 504);
         if (this.isTransientError(error))
@@ -130,6 +133,8 @@ export class GeminiAiProvider {
         return new AppError('Falha ao comunicar com o serviço de IA.', 502);
     }
     failureCategory(error) {
+        if (error instanceof GeminiProviderRateLimitError)
+            return 'provider_rate_limit';
         if (error instanceof AppError && error.statusCode === 422)
             return 'invalid_response';
         if (error instanceof AppError && error.statusCode === 504)
@@ -237,9 +242,8 @@ export class GeminiAiProvider {
                 },
                 products: {
                     type: Type.ARRAY,
-                    // Mesma fonte de env.DANFE_MAX_ITEMS usada em parseDanfeResponse (P4-01, D1):
-                    // o modelo não gasta tokens gerando itens que seriam rejeitados de qualquer forma.
-                    maxItems: String(env.DANFE_MAX_ITEMS),
+                    // O Gemini real recusa maxItems=100 por complexidade de geração.
+                    // O teto permanece no Zod após a extração, sem truncar a nota.
                     items: {
                         type: Type.OBJECT,
                         properties: {

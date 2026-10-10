@@ -1,5 +1,7 @@
 # Runbook de Telemetria — DocScan (P3-03)
 
+> **Demonstração de portfólio (2026-10-10):** `GEMINI_QUOTA_ENFORCEMENT_ENABLED=false` desliga os tetos, mas preserva reservas, consumo e reconciliação. O ledger acima de 18/5 é esperado neste modo. `provider_rate_limit` identifica HTTP 429 do Gemini; não implica cota diária esgotada nem horário de recuperação. Reservas são reconciliadas no período em que começaram. Eventos de chamadas concluídas após meia-noite podem pertencer ao dia seguinte e causar divergência de fronteira temporal na reconciliação por dia. Investigue os dois dias antes de concluir perda de eventos.
+
 > Consultas de referência sobre a telemetria de IA persistida (P3-01, P3-02), retenção de
 > `ai_call_events` (D2, `docs/pilot-decisions.md`) e como diagnosticar a ausência de dado.
 > Todo comando aqui **existe de fato** no projeto — nada neste documento é aspiracional.

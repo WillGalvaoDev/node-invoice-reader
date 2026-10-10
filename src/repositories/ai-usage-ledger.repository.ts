@@ -1,5 +1,5 @@
 /**
- * Registro autoritativo de consumo de Gemini (P4-02, D8). Decide se uma chamada pode
+ * Registro autoritativo de consumo de Gemini. Com enforcement ligado, decide se uma chamada pode
  * acontecer — nunca best-effort, ao contrário de `ai_call_events` (P3-01). Nenhuma leitura
  * de `ai_call_events` participa desta decisão.
  */
@@ -18,7 +18,7 @@ export interface AiUsageLedgerReconciliation {
 export interface IAiUsageLedgerRepository {
   /**
    * Reserva atomicamente uma requisição em ambos os escopos (global e do usuário) para o
-   * período corrente. Se qualquer um dos dois exceder seu teto, nenhuma reserva é mantida
+   * período corrente. Com enforcement ligado, se qualquer escopo exceder seu teto, nenhuma reserva é mantida
    * (tudo ou nada) — implementações devem garantir isso com uma transação real, não com
    * decremento manual best-effort.
    */

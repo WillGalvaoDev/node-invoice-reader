@@ -1,4 +1,5 @@
 import { AppError } from './app-error.js';
+import { GEMINI_PROVIDER_RATE_LIMIT_MESSAGE } from './gemini-provider-rate-limit.error.js';
 export const SIMILARITY_UNAVAILABLE_MESSAGE = 'O serviço de análise de similaridade está indisponível no momento. Nenhum dado foi gravado; reenvie a nota mais tarde.';
 /**
  * Indisponibilidade do matching por similaridade (P0-02).
@@ -13,7 +14,7 @@ export const SIMILARITY_UNAVAILABLE_MESSAGE = 'O serviço de análise de similar
 export class SimilarityUnavailableError extends AppError {
     reason;
     constructor(reason) {
-        super(SIMILARITY_UNAVAILABLE_MESSAGE, 503);
+        super(reason === 'provider_rate_limit' ? GEMINI_PROVIDER_RATE_LIMIT_MESSAGE : SIMILARITY_UNAVAILABLE_MESSAGE, 503);
         this.reason = reason;
         this.name = 'SimilarityUnavailableError';
     }

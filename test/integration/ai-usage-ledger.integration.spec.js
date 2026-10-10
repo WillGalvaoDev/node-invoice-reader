@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma, disconnectPrisma } from '../../src/infra/prisma.js';
 import { PrismaAiUsageLedgerRepository } from '../../src/repositories/prisma-ai-usage-ledger.repository.js';
+import { env } from '../../src/config/env.js';
+import { AiBudgetGuard } from '../../src/providers/ai-budget-guard.js';
 const repository = new PrismaAiUsageLedgerRepository();
 const PERIOD_KIND_DAY = 'day';
 const GLOBAL_SCOPE_ID = 'global';
@@ -13,10 +15,52 @@ async function seedLedgerRow(scope, scopeId, period, overrides = {}) {
     });
 }
 beforeEach(async () => {
+    Object.assign(env, { GEMINI_QUOTA_ENFORCEMENT_ENABLED: true });
     await prisma.aiUsageLedger.deleteMany();
 });
 afterAll(disconnectPrisma);
 describe('PostgreSQL Integration Gate — ai_usage_ledger (P4-02, D8)', () => {
+    it('reconcilia dois dias reais na ordem inversa sem reserva residual nem contador negativo', async () => {
+        env.GEMINI_QUOTA_ENFORCEMENT_ENABLED = false;
+        let now = new Date('2026-10-10T23:59:59Z');
+        const guard = new AiBudgetGuard(repository, 'gemini-2.5-flash', () => now);
+        const first = await guard.reserveAttempt('midnight-user');
+        now = new Date('2026-10-11T00:00:01Z');
+        const second = await guard.reserveAttempt('midnight-user');
+        await guard.reconcileAttempt(second, { tokens: 20 });
+        await guard.reconcileAttempt(first, { tokens: 10 });
+        const rows = await prisma.aiUsageLedger.findMany({ orderBy: [{ period: 'asc' }, { scope: 'asc' }] });
+        expect(rows).toHaveLength(4);
+        expect(rows.slice(0, 2)).toEqual([
+            expect.objectContaining({ period: '2026-10-10', reservedRequests: 0, spentRequests: 1, spentTokens: 10 }),
+            expect.objectContaining({ period: '2026-10-10', reservedRequests: 0, spentRequests: 1, spentTokens: 10 }),
+        ]);
+        expect(rows.slice(2)).toEqual([
+            expect.objectContaining({ period: '2026-10-11', reservedRequests: 0, spentRequests: 1, spentTokens: 20 }),
+            expect.objectContaining({ period: '2026-10-11', reservedRequests: 0, spentRequests: 1, spentTokens: 20 }),
+        ]);
+    });
+    it('demonstração: ultrapassa ambos os tetos sob concorrência e contabiliza cada tentativa', async () => {
+        Object.assign(env, { GEMINI_QUOTA_ENFORCEMENT_ENABLED: false });
+        const now = new Date();
+        await seedLedgerRow('global', GLOBAL_SCOPE_ID, dayPeriod(now), { spentRequests: 18 });
+        await seedLedgerRow('user', 'demo-user', dayPeriod(now), { spentRequests: 5 });
+        const reservations = await Promise.all([
+            repository.reserveRequest('demo-user', now), repository.reserveRequest('demo-user', now),
+        ]);
+        expect(reservations).toEqual([{}, {}]);
+        await Promise.all([
+            repository.reconcileRequest('demo-user', now, { tokens: 10, costUsdNanos: 100 }),
+            repository.reconcileRequest('demo-user', now, {}),
+        ]);
+        const rows = await prisma.aiUsageLedger.findMany({ orderBy: { scope: 'asc' } });
+        expect(rows).toEqual([
+            expect.objectContaining({ scope: 'global', reservedRequests: 0, spentRequests: 20, spentTokens: 10, spentCostUsdNanos: 100 }),
+            expect.objectContaining({ scope: 'user', reservedRequests: 0, spentRequests: 7, spentTokens: 10, spentCostUsdNanos: 100 }),
+        ]);
+        Object.assign(env, { GEMINI_QUOTA_ENFORCEMENT_ENABLED: true });
+        expect(await repository.reserveRequest('demo-user', now)).toEqual({ rejectedScope: 'global' });
+    });
     it('reserva aceita quando abaixo do teto, e reconcilia movendo reserved -> spent com tokens/custo reais', async () => {
         const now = new Date();
         const reservation = await repository.reserveRequest('user-1', now);

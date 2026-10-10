@@ -15,6 +15,7 @@ export declare function createEnv(environment: Environment): {
     SIMILARITY_CONFIDENCE_THRESHOLD: number;
     DANFE_MAX_ITEMS: number;
     GEMINI_ENABLED: boolean;
+    GEMINI_QUOTA_ENFORCEMENT_ENABLED: boolean;
     GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
     GEMINI_USER_REQUESTS_PER_DAY: number;
 };
@@ -33,6 +34,7 @@ export declare const env: {
     SIMILARITY_CONFIDENCE_THRESHOLD: number;
     DANFE_MAX_ITEMS: number;
     GEMINI_ENABLED: boolean;
+    GEMINI_QUOTA_ENFORCEMENT_ENABLED: boolean;
     GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
     GEMINI_USER_REQUESTS_PER_DAY: number;
 };

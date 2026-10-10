@@ -30,7 +30,7 @@ export type ISimilarityCandidate = IProduct & {
  * Por que a similaridade ficou indisponível. Serve a log e telemetria — nunca é
  * exposto ao cliente HTTP.
  */
-export type SimilarityUnavailableReason = 'timeout' | 'provider_error' | 'invalid_response' | 'candidate_not_offered' | 'unknown';
+export type SimilarityUnavailableReason = 'timeout' | 'provider_error' | 'provider_rate_limit' | 'invalid_response' | 'candidate_not_offered' | 'unknown';
 /**
  * Resultado da tentativa de similaridade. Os três estados são exaustivos e
  * distinguíveis pelo tipo, para que `unavailable` nunca possa ser lido como

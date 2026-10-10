@@ -1,5 +1,7 @@
 # Decisões do Piloto — DocScan
 
+> **Atualização de escopo — 2026-10-10.** Por decisão do responsável, o objetivo atual é uma demonstração de portfólio com IA real. A [especificação da demonstração](portfolio-demo-spec.md) e o [guia](portfolio-demo-guide.md) prevalecem para esta entrega: tetos diários internos desligados por padrão, consumo preservado, sem gate de lançamento comercial. As decisões, estados e restrições anteriores abaixo são histórico do piloto e referência para evolução futura. A ativação comercial exigirá reavaliação explícita.
+
 > Documento de registro formal das decisões humanas que parametrizam o `docs/pilot-readiness-roadmap.md`.
 > Fonte de verdade para qualquer tarefa marcada como dependente de "decisão humana" ou "P0-01".
 > Nenhum valor aqui foi inferido ou adivinhado pelo agente — cada decisão foi tomada explicitamente pelo responsável humano do projeto, na data registrada.

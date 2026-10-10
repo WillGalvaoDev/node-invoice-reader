@@ -4,10 +4,15 @@ export interface AiAttemptOutcome {
     tokens?: number;
     costUsdNanos?: number;
 }
+/** Contexto por tentativa, sem estado compartilhado entre chamadas concorrentes. */
+export interface AiAttemptReservation {
+    readonly userId: string;
+    readonly reservedAt: string;
+}
 export interface IAiBudgetGuard {
     assertEnabled(): void;
-    reserveAttempt(userId: string): Promise<void>;
-    reconcileAttempt(userId: string, outcome: AiAttemptOutcome): Promise<void>;
+    reserveAttempt(userId: string): Promise<AiAttemptReservation>;
+    reconcileAttempt(reservation: AiAttemptReservation, outcome: AiAttemptOutcome): Promise<void>;
 }
 /**
  * Guard de orçamento Gemini (P4-02, D8). Fail-closed: nenhuma chamada ao provedor acontece
@@ -22,13 +27,13 @@ export declare class AiBudgetGuard implements IAiBudgetGuard {
     /** Pré-condições que não dependem de escopo/usuário — checadas antes de qualquer reserva. */
     assertEnabled(): void;
     /** Reserva uma tentativa (global + usuário). Lança se recusado — o Gemini nunca é chamado. */
-    reserveAttempt(userId: string): Promise<void>;
+    reserveAttempt(userId: string): Promise<AiAttemptReservation>;
     /**
      * Move a reserva para gasto real. Best-effort **apenas aqui** — a chamada ao Gemini já
      * aconteceu (sucesso ou falha); uma falha nesta contabilização não pode descartar um
      * resultado já obtido. Diferente de `reserveAttempt`, que é sempre fail-closed.
      */
-    reconcileAttempt(userId: string, outcome: AiAttemptOutcome): Promise<void>;
+    reconcileAttempt(reservation: AiAttemptReservation, outcome: AiAttemptOutcome): Promise<void>;
 }
 /**
  * Default seguro para injeção (mesmo padrão de `telemetry: IAiTelemetry = aiTelemetry` em

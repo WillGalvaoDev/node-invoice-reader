@@ -16,6 +16,7 @@ const issuedAtSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).transform((value,
 // Fábrica, não constante de módulo: o teto de itens (P4-01, D1) vem de
 // env.DANFE_MAX_ITEMS, lido no ponto de uso (gemini-ai.provider.ts) — este
 // arquivo não depende de env, o que mantém o schema testável isoladamente.
+// O teto é local: não enviamos maxItems ao Gemini por complexidade de geração.
 export function createDanfeResponseSchema(maxItems: number) {
   return z.object({
     accessKey: z.string().regex(/^\d{44}$/),

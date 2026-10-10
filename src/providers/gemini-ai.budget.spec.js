@@ -20,10 +20,11 @@ const validDanfe = {
 };
 describe('GeminiAiProvider × AiBudgetGuard (P4-02)', () => {
     const budgetGuard = { assertEnabled: vi.fn(), reserveAttempt: vi.fn(), reconcileAttempt: vi.fn() };
+    const reservation = { userId: 'user-1', reservedAt: '2026-10-10T12:00:00.000Z' };
     beforeEach(() => {
         vi.resetAllMocks();
         generateContent.mockResolvedValue({ text: JSON.stringify(validDanfe) });
-        budgetGuard.reserveAttempt.mockResolvedValue(undefined);
+        budgetGuard.reserveAttempt.mockImplementation(async (userId) => ({ ...reservation, userId }));
         budgetGuard.reconcileAttempt.mockResolvedValue(undefined);
     });
     it('checa o kill switch/preço antes de qualquer reserva ou chamada ao Gemini', async () => {
@@ -57,11 +58,23 @@ describe('GeminiAiProvider × AiBudgetGuard (P4-02)', () => {
         expect(budgetGuard.reconcileAttempt).toHaveBeenCalledTimes(2);
         vi.useRealTimers();
     });
+    it('reconcilia cada retry com seu próprio contexto de reserva, inclusive atravessando meia-noite', async () => {
+        vi.useFakeTimers();
+        const first = { userId: 'user-1', reservedAt: '2026-10-10T23:59:59.000Z' };
+        const second = { userId: 'user-1', reservedAt: '2026-10-11T00:00:01.000Z' };
+        budgetGuard.reserveAttempt.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+        generateContent.mockRejectedValueOnce({ status: 503 }).mockResolvedValueOnce({ text: JSON.stringify(validDanfe) });
+        const pending = new GeminiAiProvider({ budgetGuard }).extractDanfeData(fileContent, 'image/png', { userId: 'user-1' });
+        await vi.runAllTimersAsync();
+        await pending;
+        expect(budgetGuard.reconcileAttempt.mock.calls.map(([reservation]) => reservation)).toEqual([first, second]);
+        vi.useRealTimers();
+    });
     it('uma rejeição de cota NO MEIO do retry aborta sem terceira tentativa nem novo reconcile', async () => {
         vi.useFakeTimers();
         generateContent.mockRejectedValueOnce({ status: 503, message: 'transient' });
         budgetGuard.reserveAttempt
-            .mockResolvedValueOnce(undefined)
+            .mockResolvedValueOnce(reservation)
             .mockRejectedValueOnce(new GeminiQuotaExceededError('user', 60));
         const pending = new GeminiAiProvider({ budgetGuard }).extractDanfeData(fileContent, 'image/png', { userId: 'user-1' });
         const assertion = expect(pending).rejects.toBeInstanceOf(GeminiQuotaExceededError);
@@ -78,13 +91,13 @@ describe('GeminiAiProvider × AiBudgetGuard (P4-02)', () => {
             usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 120 },
         });
         await new GeminiAiProvider({ budgetGuard }).extractDanfeData(fileContent, 'image/png', { userId: 'user-1' });
-        expect(budgetGuard.reconcileAttempt).toHaveBeenCalledWith('user-1', expect.objectContaining({ tokens: 120 }));
+        expect(budgetGuard.reconcileAttempt).toHaveBeenCalledWith(reservation, expect.objectContaining({ tokens: 120 }));
     });
     it('reconcilia com outcome vazio em caso de falha (tokens ausentes não viram zero fabricado)', async () => {
         generateContent.mockRejectedValue({ status: 401, message: 'permanent' }); // não-retryable: nem 429, nem 5xx
         await expect(new GeminiAiProvider({ budgetGuard }).extractDanfeData(fileContent, 'image/png', { userId: 'user-1' }))
             .rejects.toMatchObject({ statusCode: 502 });
-        expect(budgetGuard.reconcileAttempt).toHaveBeenCalledWith('user-1', {});
+        expect(budgetGuard.reconcileAttempt).toHaveBeenCalledWith(reservation, {});
     });
     it('sem context/userId, usa string vazia como escopo (nunca lança por falta de contexto) — default seguro para chamadores que não configuram orçamento', async () => {
         await expect(new GeminiAiProvider({ budgetGuard }).extractDanfeData(fileContent, 'image/png')).resolves.toBeDefined();

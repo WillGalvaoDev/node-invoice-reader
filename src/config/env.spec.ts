@@ -54,9 +54,26 @@ describe('configuração da aplicação', () => {
       SIMILARITY_CONFIDENCE_THRESHOLD: 0.7,
       DANFE_MAX_ITEMS: 100,
       GEMINI_ENABLED: true,
+      GEMINI_QUOTA_ENFORCEMENT_ENABLED: false,
       GEMINI_GLOBAL_REQUESTS_PER_DAY: 18,
       GEMINI_USER_REQUESTS_PER_DAY: 5,
     });
+  });
+
+  it('desliga tetos por padrão e aceita apenas booleanos explícitos para reativá-los', async () => {
+    const { createEnv } = await import('./env.js');
+    const required = { DATABASE_URL: 'postgresql://localhost/docscan', JWT_SECRET: VALID_JWT_SECRET,
+      GEMINI_API_KEY: 'test-key', INVITE_CODE: VALID_INVITE_CODE };
+    for (const value of [undefined, '', 'false']) {
+      expect(createEnv({ ...required, GEMINI_QUOTA_ENFORCEMENT_ENABLED: value }))
+        .toMatchObject({ GEMINI_QUOTA_ENFORCEMENT_ENABLED: false });
+    }
+    expect(createEnv({ ...required, GEMINI_QUOTA_ENFORCEMENT_ENABLED: 'true' }))
+      .toMatchObject({ GEMINI_QUOTA_ENFORCEMENT_ENABLED: true });
+    for (const value of ['0', '1', 'FALSE', 'disabled']) {
+      expect(() => createEnv({ ...required, GEMINI_QUOTA_ENFORCEMENT_ENABLED: value }))
+        .toThrow('GEMINI_QUOTA_ENFORCEMENT_ENABLED');
+    }
   });
 
   it('valida os limites operacionais de request e shutdown', async () => {

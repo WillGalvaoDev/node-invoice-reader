@@ -49,7 +49,7 @@ describe('AiBudgetGuard', () => {
     describe('reserveAttempt', () => {
         it('aceita quando o ledger não recusa nenhum escopo', async () => {
             const guard = new AiBudgetGuard(ledger, 'gemini-2.5-flash', now, applicationLogger);
-            await expect(guard.reserveAttempt('user-1')).resolves.toBeUndefined();
+            await expect(guard.reserveAttempt('user-1')).resolves.toEqual({ userId: 'user-1', reservedAt: now().toISOString() });
             expect(ledger.reserveRequest).toHaveBeenCalledWith('user-1', now());
         });
         it('lança GeminiQuotaExceededError(global, 503) com Retry-After até a virada do dia', async () => {
@@ -87,15 +87,31 @@ describe('AiBudgetGuard', () => {
         });
     });
     describe('reconcileAttempt', () => {
+        it('reconcilia reservas concorrentes no período original mesmo concluindo fora de ordem após meia-noite', async () => {
+            const beforeMidnight = new Date('2026-10-10T23:59:59Z');
+            const afterMidnight = new Date('2026-10-11T00:00:01Z');
+            let clock = beforeMidnight;
+            const guard = new AiBudgetGuard(ledger, 'gemini-2.5-flash', () => clock, applicationLogger);
+            const first = await guard.reserveAttempt('user-1');
+            clock = afterMidnight;
+            const second = await guard.reserveAttempt('user-1');
+            await guard.reconcileAttempt(second, { tokens: 20 });
+            await guard.reconcileAttempt(first, { tokens: 10 });
+            expect(ledger.reconcileRequest.mock.calls).toEqual([
+                ['user-1', afterMidnight, { tokens: 20 }],
+                ['user-1', beforeMidnight, { tokens: 10 }],
+            ]);
+        });
         it('delega ao ledger com o consumo informado', async () => {
             const guard = new AiBudgetGuard(ledger, 'gemini-2.5-flash', now, applicationLogger);
-            await guard.reconcileAttempt('user-1', { tokens: 120, costUsdNanos: 5_000 });
+            await guard.reconcileAttempt(await guard.reserveAttempt('user-1'), { tokens: 120, costUsdNanos: 5_000 });
             expect(ledger.reconcileRequest).toHaveBeenCalledWith('user-1', now(), { tokens: 120, costUsdNanos: 5_000 });
         });
         it('best-effort: falha do ledger na reconciliação não propaga (a chamada ao Gemini já aconteceu)', async () => {
             ledger.reconcileRequest.mockRejectedValueOnce(new Error('write failed'));
             const guard = new AiBudgetGuard(ledger, 'gemini-2.5-flash', now, applicationLogger);
-            await expect(guard.reconcileAttempt('user-1', {})).resolves.toBeUndefined();
+            const reservation = await guard.reserveAttempt('user-1');
+            await expect(guard.reconcileAttempt(reservation, {})).resolves.toBeUndefined();
             expect(applicationLogger.error).toHaveBeenCalledWith('AI usage ledger reconciliation failed', expect.objectContaining({
                 error: { name: 'Error' },
             }));
@@ -105,8 +121,9 @@ describe('AiBudgetGuard', () => {
 describe('noopAiBudgetGuard', () => {
     it('nunca recusa e nunca toca em nada — default seguro para quem não configura orçamento', async () => {
         expect(() => noopAiBudgetGuard.assertEnabled()).not.toThrow();
-        await expect(noopAiBudgetGuard.reserveAttempt('any-user')).resolves.toBeUndefined();
-        await expect(noopAiBudgetGuard.reconcileAttempt('any-user', {})).resolves.toBeUndefined();
+        const reservation = await noopAiBudgetGuard.reserveAttempt('any-user');
+        expect(reservation.userId).toBe('any-user');
+        await expect(noopAiBudgetGuard.reconcileAttempt(reservation, {})).resolves.toBeUndefined();
     });
 });
 //# sourceMappingURL=ai-budget-guard.spec.js.map

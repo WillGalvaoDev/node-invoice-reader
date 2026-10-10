@@ -54,15 +54,16 @@ export class AiBudgetGuard {
             });
             throw new GeminiQuotaExceededError(reservation.rejectedScope, retryAfterSeconds);
         }
+        return { userId, reservedAt: now.toISOString() };
     }
     /**
      * Move a reserva para gasto real. Best-effort **apenas aqui** — a chamada ao Gemini já
      * aconteceu (sucesso ou falha); uma falha nesta contabilização não pode descartar um
      * resultado já obtido. Diferente de `reserveAttempt`, que é sempre fail-closed.
      */
-    async reconcileAttempt(userId, outcome) {
+    async reconcileAttempt(reservation, outcome) {
         try {
-            await this.ledger.reconcileRequest(userId, this.now(), outcome);
+            await this.ledger.reconcileRequest(reservation.userId, new Date(reservation.reservedAt), outcome);
         }
         catch (error) {
             this.applicationLogger.error('AI usage ledger reconciliation failed', {
@@ -80,7 +81,7 @@ export class AiBudgetGuard {
  */
 export const noopAiBudgetGuard = {
     assertEnabled() { },
-    async reserveAttempt() { },
+    async reserveAttempt(userId) { return { userId, reservedAt: new Date().toISOString() }; },
     async reconcileAttempt() { },
 };
 //# sourceMappingURL=ai-budget-guard.js.map

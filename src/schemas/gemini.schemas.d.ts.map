@@ -1,1 +1,1 @@
-{"version":3,"file":"gemini.schemas.d.ts","sourceRoot":"","sources":["gemini.schemas.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,CAAC,EAAE,MAAM,KAAK,CAAC;AAkBxB,wBAAgB,yBAAyB,CAAC,QAAQ,EAAE,MAAM;;;;;;;;;;;;;;;;;;;kBAqBzD;AAED,eAAO,MAAM,wBAAwB;;;;;iBAKnC,CAAC"}
+{"version":3,"file":"gemini.schemas.d.ts","sourceRoot":"","sources":["gemini.schemas.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,CAAC,EAAE,MAAM,KAAK,CAAC;AAmBxB,wBAAgB,yBAAyB,CAAC,QAAQ,EAAE,MAAM;;;;;;;;;;;;;;;;;;;kBAqBzD;AAED,eAAO,MAAM,wBAAwB;;;;;iBAKnC,CAAC"}

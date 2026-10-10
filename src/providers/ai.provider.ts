@@ -36,6 +36,7 @@ export type ISimilarityCandidate = IProduct & { id: string };
 export type SimilarityUnavailableReason =
   | 'timeout'
   | 'provider_error'
+  | 'provider_rate_limit'
   | 'invalid_response'
   | 'candidate_not_offered'
   | 'unknown';

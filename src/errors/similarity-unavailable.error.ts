@@ -1,4 +1,5 @@
 import { AppError } from './app-error.js';
+import { GEMINI_PROVIDER_RATE_LIMIT_MESSAGE } from './gemini-provider-rate-limit.error.js';
 import type { SimilarityUnavailableReason } from '../providers/ai.provider.js';
 
 export const SIMILARITY_UNAVAILABLE_MESSAGE =
@@ -16,7 +17,7 @@ export const SIMILARITY_UNAVAILABLE_MESSAGE =
  */
 export class SimilarityUnavailableError extends AppError {
   constructor(public readonly reason: SimilarityUnavailableReason) {
-    super(SIMILARITY_UNAVAILABLE_MESSAGE, 503);
+    super(reason === 'provider_rate_limit' ? GEMINI_PROVIDER_RATE_LIMIT_MESSAGE : SIMILARITY_UNAVAILABLE_MESSAGE, 503);
     this.name = 'SimilarityUnavailableError';
   }
 }

@@ -1,0 +1,26 @@
+{
+  "initial": {
+    "accessKey": "11111111111111111111111111111111111111111111",
+    "invoiceNumber": "1",
+    "series": "999",
+    "issuedAt": "2026-10-10",
+    "totalValue": 20,
+    "supplier": { "cnpj": "11222333000181", "name": "Fornecedor Sintetico DocScan" },
+    "products": [
+      { "code": "CAN-A", "description": "Caneta esferografica azul", "quantity": 10, "unitMeasurement": "UN", "unitPrice": 2, "totalPrice": 20 }
+    ]
+  },
+  "followup": {
+    "accessKey": "22222222222222222222222222222222222222222222",
+    "invoiceNumber": "2",
+    "series": "999",
+    "issuedAt": "2026-10-10",
+    "totalValue": 25,
+    "supplier": { "cnpj": "11222333000181", "name": "Fornecedor Sintetico DocScan" },
+    "products": [
+      { "code": "CAN-A", "description": "Caneta esferografica azul", "quantity": 2, "unitMeasurement": "UN", "unitPrice": 2, "totalPrice": 4 },
+      { "code": "CAD-A", "description": "Caderno capa dura", "quantity": 1, "unitMeasurement": "UN", "unitPrice": 15, "totalPrice": 15 },
+      { "code": "CAN-B", "description": "Caneta esferografica azul", "quantity": 3, "unitMeasurement": "UN", "unitPrice": 2, "totalPrice": 6 }
+    ]
+  }
+}

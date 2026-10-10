@@ -97,14 +97,14 @@ export function createEnv(environment) {
         // Fonte única do limiar de similaridade: mesmo valor usado no prompt e na decisão em código (M6-02).
         SIMILARITY_CONFIDENCE_THRESHOLD: parseDecimalInRange(environment.SIMILARITY_CONFIDENCE_THRESHOLD, 0.7, 'SIMILARITY_CONFIDENCE_THRESHOLD', 0, 1),
         // Teto operacional do piloto (D1, docs/pilot-decisions.md), não regra fiscal.
-        // Fonte única: mesmo valor usado no maxItems do prompt e na validação do schema (P4-01).
+        // Validado no Zod após extração; maxItems no request é recusado pelo Gemini real.
         DANFE_MAX_ITEMS: parseIntegerInRange(environment.DANFE_MAX_ITEMS, 100, 'DANFE_MAX_ITEMS', 1, 1000),
         // Kill switch do guard de orçamento (P4-02, D8): separado do teto — desligar não é "sem cota".
         GEMINI_ENABLED: parseBoolean(environment.GEMINI_ENABLED, true, 'GEMINI_ENABLED'),
-        // Tetos internos de requisições/dia do Modo A (P4-02, D8) — deliberadamente abaixo da
-        // cota real do provedor (RPD=20 para gemini-2.5-flash, lida no AI Studio em 2026-09-02),
-        // nunca igual ou acima dela. Defaults refletem a decisão humana; a faixa de validação
-        // (máximo 20) impede configurar um teto que anularia a proteção.
+        // Demonstração de portfólio: medir consumo sem impor tetos internos por padrão.
+        GEMINI_QUOTA_ENFORCEMENT_ENABLED: parseBoolean(environment.GEMINI_QUOTA_ENFORCEMENT_ENABLED, false, 'GEMINI_QUOTA_ENFORCEMENT_ENABLED'),
+        // Política histórica D8, aplicada somente com enforcement ligado. Não representa
+        // uma garantia sobre a cota atual do provedor nem uma política comercial futura.
         GEMINI_GLOBAL_REQUESTS_PER_DAY: parseIntegerInRange(environment.GEMINI_GLOBAL_REQUESTS_PER_DAY, 18, 'GEMINI_GLOBAL_REQUESTS_PER_DAY', 1, 20),
         GEMINI_USER_REQUESTS_PER_DAY: parseIntegerInRange(environment.GEMINI_USER_REQUESTS_PER_DAY, 5, 'GEMINI_USER_REQUESTS_PER_DAY', 1, 20),
     };

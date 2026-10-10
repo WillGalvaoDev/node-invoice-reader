@@ -61,6 +61,20 @@ describe('ReadInvoiceUseCase · similaridade indisponível (P0-02)', () => {
     it('aborta a nota com erro de indisponibilidade em vez de cadastrar produto', async () => {
         await expect(makeSut(unavailableAi()).execute(request)).rejects.toMatchObject({ statusCode: 503 });
     });
+    it('recusa de cota no segundo item explica aborto integral, limpa arquivo e permite reenvio', async () => {
+        const ai = unavailableAi('provider_rate_limit');
+        ai.findSimilarProduct.mockResolvedValueOnce({ kind: 'no_match' });
+        await expect(makeSut(ai).execute(request)).rejects.toMatchObject({
+            statusCode: 503,
+            message: 'O serviço de IA atingiu um limite temporário. Nenhuma alteração desta nota foi aplicada ao estoque. Tente novamente mais tarde.',
+        });
+        expect(persistence.persist).not.toHaveBeenCalled();
+        expect(audit.create).not.toHaveBeenCalled();
+        expect(storage.deleteFile).toHaveBeenCalledWith(request.filePath);
+        ai.findSimilarProduct.mockResolvedValue({ kind: 'no_match' });
+        await expect(makeSut(ai).execute(request)).resolves.toMatchObject({ suggestions: [] });
+        expect(persistence.persist).toHaveBeenCalledOnce();
+    });
     it('não persiste nada: nenhum produto, nenhuma sugestão, nenhuma ProcessedInvoice', async () => {
         await expect(makeSut(unavailableAi()).execute(request)).rejects.toThrow();
         expect(persistence.persist).not.toHaveBeenCalled();

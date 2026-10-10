@@ -338,14 +338,14 @@ describe('GeminiAiProvider file MIME', () => {
       expect(generateContent).toHaveBeenCalledTimes(1);
     });
 
-    it('envia maxItems ao Gemini no mesmo valor de DANFE_MAX_ITEMS — fonte única, como o limiar de similaridade', async () => {
-      env.DANFE_MAX_ITEMS = 7;
+    it('não envia maxItems: o Gemini real recusa a complexidade; o teto permanece na validação local', async () => {
+      env.DANFE_MAX_ITEMS = 100;
       generateContent.mockResolvedValueOnce({ text: JSON.stringify(validDanfe) });
 
       await new GeminiAiProvider().extractDanfeData(fileContent, 'image/png');
 
       const requestBody = generateContent.mock.calls[0]?.[0];
-      expect(requestBody.config.responseSchema.properties.products.maxItems).toBe('7');
+      expect(requestBody.config.responseSchema.properties.products).not.toHaveProperty('maxItems');
     });
   });
 });
