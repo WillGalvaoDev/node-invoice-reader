@@ -42,6 +42,37 @@ jobs:
       - run: npm test
       - run: npm run test:integration:postgres:docker
 
+  web:
+    # Interface web (DP-03): tipos, testes de componente e build estático.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run typecheck
+      - run: npm --prefix web test
+      - run: npm --prefix web run build
+
+  web-e2e:
+    # E2E de navegador contra a API real, PostgreSQL efêmero e Gemini determinístico
+    # (web/e2e/fake-gemini.mjs). Usa o Chrome do runner; nenhum Gemini real é chamado.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run build
+      - run: npm --prefix web ci
+      - run: npm --prefix web run test:e2e
+
   production-runtime:
     runs-on: ubuntu-latest
     env:

@@ -1,7 +1,8 @@
 # Demonstração de portfólio — DocScan
 
 O objetivo atual é demonstrar extração por IA, validação, autorização, transações,
-revisão humana, auditoria e observabilidade. A API usa Gemini real. Não há frontend.
+revisão humana, auditoria e observabilidade. A API usa Gemini real. Há uma interface web mínima em `/app` (DP-03); o roteiro por API
+abaixo continua válido e é o caminho para quem prefere um cliente HTTP.
 Especificação e decisões: [portfolio-demo-spec.md](portfolio-demo-spec.md).
 
 ## Configuração

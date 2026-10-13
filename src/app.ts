@@ -6,6 +6,7 @@ import { requestIdMiddleware } from './middlewares/request-id.js';
 import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
 import { createErrorHandler } from './middlewares/error-handler.js';
 import { createHealthRateLimiter } from './middlewares/health-rate-limiter.js';
+import { apiNotFound, createWebRouter, webArtifactExists } from './web/web-app.js';
 
 export interface OperationalState {
   isShuttingDown(): boolean;
@@ -29,6 +30,8 @@ interface CreateAppOptions {
   allowedOrigins?: readonly string[];
   healthCacheTtlMs?: number;
   healthRateLimiter?: RequestHandler;
+  /** Diretório do build da interface web; ausente ou sem index.html = interface não servida. */
+  webDistDir?: string;
 }
 
 export function createApp({
@@ -40,6 +43,7 @@ export function createApp({
   allowedOrigins = [],
   healthCacheTtlMs = 5_000,
   healthRateLimiter = createHealthRateLimiter(),
+  webDistDir,
 }: CreateAppOptions) {
   const app = express();
   let healthyUntil = 0;
@@ -80,6 +84,12 @@ export function createApp({
 
   app.use(express.json());
   app.use(applicationRoutes);
+  if (webDistDir && webArtifactExists(webDistDir)) {
+    app.use(createWebRouter(webDistDir));
+  } else if (webDistDir) {
+    logger.warn('Web interface artifact not found; serving API only');
+  }
+  app.use(apiNotFound);
   app.use(createErrorHandler(logger));
 
   return app;

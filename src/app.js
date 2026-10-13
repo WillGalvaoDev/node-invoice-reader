@@ -5,6 +5,7 @@ import { requestIdMiddleware } from './middlewares/request-id.js';
 import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
 import { createErrorHandler } from './middlewares/error-handler.js';
 import { createHealthRateLimiter } from './middlewares/health-rate-limiter.js';
+import { apiNotFound, createWebRouter, webArtifactExists } from './web/web-app.js';
 export function createOperationalState() {
     let shuttingDown = false;
     return {
@@ -12,7 +13,7 @@ export function createOperationalState() {
         beginShutdown: () => { shuttingDown = true; },
     };
 }
-export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), }) {
+export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), webDistDir, }) {
     const app = express();
     let healthyUntil = 0;
     let pendingHealthProbe;
@@ -48,6 +49,13 @@ export function createApp({ applicationRoutes, healthProbe, operationalState = c
     });
     app.use(express.json());
     app.use(applicationRoutes);
+    if (webDistDir && webArtifactExists(webDistDir)) {
+        app.use(createWebRouter(webDistDir));
+    }
+    else if (webDistDir) {
+        logger.warn('Web interface artifact not found; serving API only');
+    }
+    app.use(apiNotFound);
     app.use(createErrorHandler(logger));
     return app;
 }

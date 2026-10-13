@@ -5,3 +5,5 @@ dist/
 dev.db
 tmp/
 __pycache__/
+web/test-results/
+web/playwright-report/

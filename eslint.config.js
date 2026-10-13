@@ -24,6 +24,7 @@ export default tseslint.config(
       'vitest.integration.config.d.ts',
       'vitest.integration.config.d.ts.map',
       'prisma/migrations/**',
+      'web/**',
     ],
   },
   {

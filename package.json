@@ -21,7 +21,11 @@
     "verify:artifacts": "node scripts/verify-build-artifacts.mjs",
     "retention:ai-call-events": "node scripts/purge-ai-call-events.mjs",
     "reconcile:ai-usage": "node scripts/reconcile-ai-usage.mjs",
-    "render:build": "npm run prisma:generate && npm run build && npx prisma migrate deploy"
+    "web:install": "npm --prefix web ci",
+    "web:build": "npm --prefix web run build",
+    "web:test": "npm --prefix web test",
+    "web:test:e2e": "npm --prefix web run test:e2e",
+    "render:build": "npm run prisma:generate && npm run build && npm run web:install && npm run web:build && npx prisma migrate deploy"
   },
   "keywords": [],
   "author": "",

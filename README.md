@@ -63,6 +63,17 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | `POST` | `/demo/sessions/:sessionId/restart` | Bearer JWT, `DEMO_ENABLED=true`, mesmo rate limit | Arquiva a sessão e cria sucessora vazia; repetir o mesmo ID devolve a mesma sucessora. |
 | `PATCH` | `/me/password` | Bearer JWT, rate limit 5/min por usuário | Troca a própria senha (`currentPassword`/`newPassword`). `204` sem corpo. Incrementa `authVersion` na mesma escrita do novo hash — todo token emitido antes da troca deixa de ser aceito, imediatamente e sem depender de comparação de timestamp. |
 
+### Interface web (DP-03)
+
+Uma interface mínima (`web/`, React + Vite + TypeScript) é servida pelo próprio backend em **`/app`**, na mesma origem da API — sem CORS e sem segredo no bundle. `GET /` redireciona para `/app/`; deep links e refresh sob `/app/*` recebem o `index.html`; arquivo inexistente ou rota de API desconhecida responde `404` JSON `{status:'error'}`, nunca HTML. As respostas de `/app` carregam CSP restritiva (`script-src 'self'`, sem `unsafe-eval`).
+
+* **Jornada:** entrar/criar conta (convite do operador) → preparar ambiente de exemplo → baixar notas → enviar → revisar sugestões lado a lado → confirmar/rejeitar → consultar estoque; troca de senha, saída e reinício do ambiente (com confirmação).
+* **Token só em memória:** recarregar exige novo login; a sessão de demonstração é reencontrada por `GET /demo/sessions/current`. O JWT nunca vai em URL.
+* **Sem retry automático** de upload, decisão ou IA; falhas são traduzidas por tipo (401, 403/404, 409, 422, 429, 503/504, rede) e, em estado desconhecido, a tela relê o estoque antes de qualquer reenvio.
+* **Conteúdo extraído é texto:** nenhuma renderização de HTML bruto.
+* O build (`web/dist`) é gerado no deploy (`render:build`) e **nunca versionado**. Comandos: `npm --prefix web ci`, `npm run web:build`, `npm run web:test`, `npm run web:test:e2e` (E2E: API real compilada + PostgreSQL efêmero + Gemini determinístico em processo separado, `web/e2e/`, exige Docker e Chrome).
+* Os rate limits de `/users` (5/h/IP) e `/login` (10/15 min/IP) valem para o E2E; a suíte usa poucas contas por execução.
+
 ### Autenticação e tenancy
 
 Bearer JWT (`Authorization: Bearer <token>`), verificado via `jose`. `req.user` só existe **depois** do middleware de autenticação — é `undefined` em `/login`, `/users` e em qualquer ponto anterior a ele (refletido no tipo: `Express.Request.user?: { id: string }`).
@@ -161,6 +172,8 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 * **`npm test`** — suíte unitária (Vitest), dublês in-memory, sem rede nem Postgres real.
 * **`npm run test:integration:postgres:docker`** — sobe um PostgreSQL 16 efêmero via Docker Compose, aplica as migrations do zero, roda os testes de integração real (transação, rollback, concorrência, constraints, idempotência) e desmonta tudo no final.
 * **`npm run lint`** — ESLint (`typescript-eslint`, sem type-checking completo para evitar ruído em dublês de teste) com duas regras type-aware ligadas deliberadamente: `no-floating-promises` e `no-misused-promises` — a classe exata de defeito que já derrubou o processo em produção antes da correção.
+* **`npm run web:test`** — testes de componente e de cliente HTTP da interface (Vitest + Testing Library, contratos simulados por um backend falso em memória).
+* **`npm run web:test:e2e`** — jornada completa no navegador (Playwright, Chrome do sistema) contra a API real, PostgreSQL efêmero e um Gemini determinístico separado (`GOOGLE_GEMINI_BASE_URL` apontando para `web/e2e/fake-gemini.mjs`; o serviço público não tem endpoint de simulação).
 * **`npm run typecheck`**, **`npm run build`**, **`npm run prisma:validate`**, **`npm run verify:production`** completam o Definition of Done local.
 
 ---
@@ -205,7 +218,7 @@ Para rodar a suíte de integração contra Postgres real é necessário Docker (
 **Status: primeiro deploy corrigido concluído em 2026-09-02.** O commit `ddb8536` ficou Live no Render Free contra Neon Free. `prisma generate`, build TypeScript e `prisma migrate deploy` passaram; um segundo deploy do mesmo commit encontrou 13 migrations e nenhuma pendente, e `prisma migrate status` local contra a URL direta real declarou o schema atualizado. `/health` público retornou `200 {"status":"ok"}` e, como executa `SELECT 1`, comprovou a conexão runtime pooled. A observação de `SIGTERM → exit 0` no Render real permanece **NOT_YET_VERIFIED / DEFERRED** para P5-02; não foi inferida dos testes e não será buscada por restart/redeploy exclusivo.
 
 * **Sem Dockerfile.** O runtime nativo Node do Render usa build/start commands; `npm prune --omit=dev` + `verify:production` já validam o grafo de produção no CI. Um Dockerfile acrescentaria superfície sem resolver nada que o runtime nativo não resolva — revisitar só se o build vier a exigir binário de sistema.
-* **Build command:** `npm ci && npm run render:build` (equivalente a `npm ci && npm run prisma:generate && npm run build && npx prisma migrate deploy` — `prisma generate` precisa rodar **antes** de `tsc`, nunca implícito em `npm ci`: não há `postinstall`/`prepare` neste projeto, por decisão deliberada, para não exigir `DATABASE_URL` em todo `npm install`). Guardado contra regressão por um job de CI dedicado (`render-build-command`, ver `.github/workflows/ci.yml`) que roda esse exato comando a partir de um checkout novo, contra Postgres efêmero.
+* **Build command:** `npm ci && npm run render:build` (equivalente a `npm ci && npm run prisma:generate && npm run build && npm --prefix web ci && npm --prefix web run build && npx prisma migrate deploy` — `prisma generate` precisa rodar **antes** de `tsc`, nunca implícito em `npm ci`: não há `postinstall`/`prepare` neste projeto, por decisão deliberada, para não exigir `DATABASE_URL` em todo `npm install`). Guardado contra regressão por um job de CI dedicado (`render-build-command`, ver `.github/workflows/ci.yml`) que roda esse exato comando a partir de um checkout novo, contra Postgres efêmero.
 * **Start command:** `DATABASE_URL=$DATABASE_URL_POOLED npm start` — reatribui `DATABASE_URL` só para o processo em execução; a variável `DATABASE_URL` configurada no painel do Render permanece a *direta* (usada pelo build/migration acima).
 * **Migration no build, não em Pre-Deploy Command** (exclusivo de planos pagos no Render). Efeito: `prisma` existe no momento do build (antes do `npm prune`), o que resolve o problema de empacotamento sem exigir Dockerfile — mas a migration roda **antes** da nova versão entrar em tráfego e **não é desfeita por rollback**.
 * **Política expand/contract é obrigatória, não recomendada**, por causa do ponto acima: toda migration precisa ser compatível com a versão anterior da aplicação, porque essa versão pode voltar a rodar contra o schema novo após um rollback. Verificado: nenhuma das migrations existentes viola isso.

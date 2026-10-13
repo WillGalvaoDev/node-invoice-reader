@@ -40,5 +40,7 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true,
-  }
+  },
+  // A interface web (web/) tem toolchain e tsconfig próprios; nunca emite .js no backend.
+  "exclude": ["node_modules", "web"]
 }

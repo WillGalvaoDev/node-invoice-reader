@@ -14,7 +14,9 @@ interface CreateAppOptions {
     allowedOrigins?: readonly string[];
     healthCacheTtlMs?: number;
     healthRateLimiter?: RequestHandler;
+    /** Diretório do build da interface web; ausente ou sem index.html = interface não servida. */
+    webDistDir?: string;
 }
-export declare function createApp({ applicationRoutes, healthProbe, operationalState, logger, trustProxyHops, allowedOrigins, healthCacheTtlMs, healthRateLimiter, }: CreateAppOptions): import("express-serve-static-core").Express;
+export declare function createApp({ applicationRoutes, healthProbe, operationalState, logger, trustProxyHops, allowedOrigins, healthCacheTtlMs, healthRateLimiter, webDistDir, }: CreateAppOptions): import("express-serve-static-core").Express;
 export {};
 //# sourceMappingURL=app.d.ts.map
