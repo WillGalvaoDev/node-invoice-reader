@@ -13,7 +13,7 @@ export function createOperationalState() {
         beginShutdown: () => { shuttingDown = true; },
     };
 }
-export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), webDistDir, }) {
+export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), webDistDir, releaseInfo, }) {
     const app = express();
     let healthyUntil = 0;
     let pendingHealthProbe;
@@ -47,6 +47,13 @@ export function createApp({ applicationRoutes, healthProbe, operationalState = c
             return response.status(503).json({ status: 'unavailable' });
         }
     });
+    if (releaseInfo) {
+        // Sem consulta ao banco e sem configuração: apenas o SHA, para provar qual release atende.
+        app.get('/version', healthRateLimiter, (_request, response) => {
+            response.set('Cache-Control', 'no-store');
+            return response.status(200).json({ status: 'success', data: releaseInfo });
+        });
+    }
     app.use(express.json());
     app.use(applicationRoutes);
     if (webDistDir && webArtifactExists(webDistDir)) {

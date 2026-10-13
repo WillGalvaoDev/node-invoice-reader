@@ -1,5 +1,6 @@
 import { type RequestHandler } from 'express';
 import type { Logger } from './infra/logger.js';
+import type { ReleaseInfo } from './infra/release-info.js';
 export interface OperationalState {
     isShuttingDown(): boolean;
     beginShutdown(): void;
@@ -16,7 +17,9 @@ interface CreateAppOptions {
     healthRateLimiter?: RequestHandler;
     /** Diretório do build da interface web; ausente ou sem index.html = interface não servida. */
     webDistDir?: string;
+    /** Identificador público da release (SHA); ausente = `/version` não é registrada. */
+    releaseInfo?: ReleaseInfo;
 }
-export declare function createApp({ applicationRoutes, healthProbe, operationalState, logger, trustProxyHops, allowedOrigins, healthCacheTtlMs, healthRateLimiter, webDistDir, }: CreateAppOptions): import("express-serve-static-core").Express;
+export declare function createApp({ applicationRoutes, healthProbe, operationalState, logger, trustProxyHops, allowedOrigins, healthCacheTtlMs, healthRateLimiter, webDistDir, releaseInfo, }: CreateAppOptions): import("express-serve-static-core").Express;
 export {};
 //# sourceMappingURL=app.d.ts.map

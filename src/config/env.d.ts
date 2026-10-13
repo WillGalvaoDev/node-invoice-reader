@@ -18,6 +18,8 @@ export declare function createEnv(environment: Environment): {
     GEMINI_QUOTA_ENFORCEMENT_ENABLED: boolean;
     GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
     GEMINI_USER_REQUESTS_PER_DAY: number;
+    RENDER_GIT_COMMIT: string | undefined;
+    RELEASE_SHA: string | undefined;
     DEMO_ENABLED: boolean;
     DEMO_COMMANDS_PER_MINUTE: number;
 };
@@ -39,6 +41,8 @@ export declare const env: {
     GEMINI_QUOTA_ENFORCEMENT_ENABLED: boolean;
     GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
     GEMINI_USER_REQUESTS_PER_DAY: number;
+    RENDER_GIT_COMMIT: string | undefined;
+    RELEASE_SHA: string | undefined;
     DEMO_ENABLED: boolean;
     DEMO_COMMANDS_PER_MINUTE: number;
 };

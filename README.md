@@ -63,6 +63,17 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | `POST` | `/demo/sessions/:sessionId/restart` | Bearer JWT, `DEMO_ENABLED=true`, mesmo rate limit | Arquiva a sessão e cria sucessora vazia; repetir o mesmo ID devolve a mesma sucessora. |
 | `PATCH` | `/me/password` | Bearer JWT, rate limit 5/min por usuário | Troca a própria senha (`currentPassword`/`newPassword`). `204` sem corpo. Incrementa `authVersion` na mesma escrita do novo hash — todo token emitido antes da troca deixa de ser aceito, imediatamente e sem depender de comparação de timestamp. |
 
+### Estado da demonstração (2026-10-10)
+
+| | Itens |
+|---|---|
+| **Implementado e testado localmente** | extração + validação + matching seguro por fornecedor/unidade; sugestões com decisão humana; sessões de demonstração por visitante (`/demo/*`); interface web em `/app`; `GET /version`; smoke sem IA (`scripts/smoke-demo.mjs`); ensaio isolado de reconstrução e rollback (`scripts/rehearse-release.mjs`); runbook ([operacional](docs/demo-operations-runbook.md)) |
+| **Demonstrado com Gemini real** | apenas o fluxo local registrado em [`docs/portfolio-demo-guide.md`](docs/portfolio-demo-guide.md) (2026-10-10, versão anterior às mudanças desta etapa) |
+| **Pendente** | publicação desta release, smoke e medições no serviço hospedado, fluxo real hospedado (ver [DP-04](docs/evidence/DP-04.md) e [DP-05](docs/evidence/DP-05.md)) |
+| **Futuro** | backup/restore com RPO/RTO, recuperação de senha por e-mail, orçamento por usuário, múltiplos fornecedores com conversão de unidades, documentos reais |
+
+Visão técnica para apresentação: [`docs/portfolio-technical-overview.md`](docs/portfolio-technical-overview.md). Plano: [`docs/demo-pilot-roadmap.md`](docs/demo-pilot-roadmap.md).
+
 ### Interface web (DP-03)
 
 Uma interface mínima (`web/`, React + Vite + TypeScript) é servida pelo próprio backend em **`/app`**, na mesma origem da API — sem CORS e sem segredo no bundle. `GET /` redireciona para `/app/`; deep links e refresh sob `/app/*` recebem o `index.html`; arquivo inexistente ou rota de API desconhecida responde `404` JSON `{status:'error'}`, nunca HTML. As respostas de `/app` carregam CSP restritiva (`script-src 'self'`, sem `unsafe-eval`).
@@ -162,6 +173,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 | `GEMINI_ENABLED` | não | `true` | Kill switch do guard de orçamento (P4-02). `false` recusa toda chamada de IA com `503` sem `Retry-After` (decisão do operador, não janela de cota) — resto do sistema intacto. |
 | `GEMINI_GLOBAL_REQUESTS_PER_DAY` | não | `18` | Teto global histórico, faixa 1–20. Aplicado somente com enforcement habilitado. |
 | `GEMINI_USER_REQUESTS_PER_DAY` | não | `5` | Teto individual histórico, faixa 1–20. Aplicado somente com enforcement habilitado. |
+| `RELEASE_SHA` | não | — | SHA da release exposto por `GET /version` quando a plataforma não informa `RENDER_GIT_COMMIT` (que o Render define sozinho). Só hexadecimal de 7–40 caracteres é aceito; qualquer outro valor vira `unknown`. Não é segredo. |
 | `DEMO_ENABLED` | não | `false` | Registra as rotas `/demo/*` (DP-02). Habilitar somente no serviço de demonstração; desligado, as rotas não existem (`404`). |
 | `DEMO_COMMANDS_PER_MINUTE` | não | `5` | Comandos de preparar/reiniciar sessão por usuário por minuto (1–60). Protege a criação de registros; é independente da cota de IA. |
 

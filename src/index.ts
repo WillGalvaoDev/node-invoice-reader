@@ -6,6 +6,7 @@ import { logger } from './infra/logger.js';
 import { disconnectPrisma } from './infra/prisma.js';
 import { checkDatabaseHealth } from './infra/health.js';
 import { createApp, createOperationalState } from './app.js';
+import { readReleaseInfo } from './infra/release-info.js';
 import { createHttpServer, createServerLifecycle, installProcessHandlers } from './server-lifecycle.js';
 
 // src/index.js -> raiz do projeto -> web/dist (gerado no build; nunca versionado).
@@ -21,6 +22,10 @@ export function startApplication() {
     trustProxyHops: env.TRUST_PROXY_HOPS,
     allowedOrigins: env.CORS_ALLOWED_ORIGINS,
     webDistDir: WEB_DIST_DIR,
+    releaseInfo: readReleaseInfo(
+      { RENDER_GIT_COMMIT: env.RENDER_GIT_COMMIT, RELEASE_SHA: env.RELEASE_SHA },
+      WEB_DIST_DIR,
+    ),
   });
   const server = createHttpServer(app, env.REQUEST_TIMEOUT_MS);
   const lifecycle = createServerLifecycle({

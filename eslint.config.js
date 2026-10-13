@@ -54,7 +54,15 @@ export default tseslint.config(
     files: ['scripts/**/*.mjs', 'eslint.config.js'],
     extends: [js.configs.recommended],
     languageOptions: {
-      globals: { process: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        performance: 'readonly',
+        Buffer: 'readonly',
+      },
     },
   },
 );

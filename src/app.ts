@@ -7,6 +7,7 @@ import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
 import { createErrorHandler } from './middlewares/error-handler.js';
 import { createHealthRateLimiter } from './middlewares/health-rate-limiter.js';
 import { apiNotFound, createWebRouter, webArtifactExists } from './web/web-app.js';
+import type { ReleaseInfo } from './infra/release-info.js';
 
 export interface OperationalState {
   isShuttingDown(): boolean;
@@ -32,6 +33,8 @@ interface CreateAppOptions {
   healthRateLimiter?: RequestHandler;
   /** Diretório do build da interface web; ausente ou sem index.html = interface não servida. */
   webDistDir?: string;
+  /** Identificador público da release (SHA); ausente = `/version` não é registrada. */
+  releaseInfo?: ReleaseInfo;
 }
 
 export function createApp({
@@ -44,6 +47,7 @@ export function createApp({
   healthCacheTtlMs = 5_000,
   healthRateLimiter = createHealthRateLimiter(),
   webDistDir,
+  releaseInfo,
 }: CreateAppOptions) {
   const app = express();
   let healthyUntil = 0;
@@ -81,6 +85,14 @@ export function createApp({
       return response.status(503).json({ status: 'unavailable' });
     }
   });
+
+  if (releaseInfo) {
+    // Sem consulta ao banco e sem configuração: apenas o SHA, para provar qual release atende.
+    app.get('/version', healthRateLimiter, (_request, response) => {
+      response.set('Cache-Control', 'no-store');
+      return response.status(200).json({ status: 'success', data: releaseInfo });
+    });
+  }
 
   app.use(express.json());
   app.use(applicationRoutes);
