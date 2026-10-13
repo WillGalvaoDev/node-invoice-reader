@@ -34,7 +34,7 @@ Quem recebe mercadoria confere a nota e digita cada item no sistema de estoque. 
 
 **Endereço:** <https://docscan-api-n5bj.onrender.com/app/>
 
-O acesso é feito por **convite**: o cadastro pede um código de convite, que não é publicado neste repositório. Para receber o código, entre em contato com o autor pelo [perfil no GitHub](https://github.com/WillGalvaoDev).
+O acesso é feito por **convite**: o cadastro pede um código de convite, que não é publicado neste repositório. Para pedir acesso, abra uma [issue neste repositório](https://github.com/WillGalvaoDev/node-invoice-reader/issues) informando como prefere ser contatado. O código é enviado em particular, nunca em comentário público.
 
 Com o código em mãos:
 
@@ -48,7 +48,7 @@ Com o código em mãos:
 Bom saber antes de usar:
 
 - Use apenas as notas de exemplo. **Não envie notas fiscais reais.**
-- O serviço roda em plano gratuito: o primeiro acesso depois de um período parado pode levar algumas dezenas de segundos.
+- O primeiro acesso depois de um período sem uso pode demorar mais que o normal enquanto o serviço inicia.
 - A leitura usa o Google Gemini real. Se o provedor recusar ou demorar, a tela informa o erro e nada é gravado; basta tentar de novo mais tarde.
 - O login tem limite de tentativas por endereço. Se aparecer aviso de limite, aguarde alguns minutos.
 
@@ -102,7 +102,7 @@ Integração com ERP, emissão fiscal, leitura direta do XML da NF-e e catálogo
 
 **Demonstração funcional de portfólio, não um produto comercial pronto para operação.**
 
-- Publicado no Render com banco PostgreSQL no Neon, em planos gratuitos, sem SLA.
+- Publicado no Render com banco PostgreSQL no Neon, sem SLA.
 - O fluxo completo (cadastro, leitura com Gemini real, sugestão, confirmação, rejeição e persistência) foi validado manualmente no ambiente publicado.
 - Os dados da demonstração são sintéticos. Não há backup com garantia de recuperação, recuperação de senha por e-mail nem suporte a notas reais.
 - Histórico de decisões e evidências: [roadmap da demonstração](docs/demo-pilot-roadmap.md), [DP-04](docs/evidence/DP-04.md) e [DP-05](docs/evidence/DP-05.md).
@@ -204,7 +204,7 @@ Os testes não chamam o Gemini real. `JWT_SECRET` pode ser gerado com `openssl r
 ## Limitações conhecidas
 
 - **Identificação do visitante atrás do proxy do Render (D03):** o limite de tentativas de login usa o endereço de rede do visitante, e atrás da cadeia Cloudflare + balanceador do Render essa identificação não é estável. Na prática, visitantes podem dividir o mesmo limite, ou um visitante pode ter o limite dividido. Não permite falsificar a identidade; o efeito possível é um aviso de limite temporário. Detalhes em [DP-04](docs/evidence/DP-04.md) e no [runbook](docs/demo-operations-runbook.md) §10.
-- **Dependências externas em plano gratuito:** a disponibilidade depende do Google Gemini (sem cota reservada), do Render (inicialização lenta após inatividade) e do Neon.
+- **Dependências externas:** a disponibilidade depende do Google Gemini (sem cota reservada), do Render e do Neon. O primeiro acesso após um período sem uso pode ser mais lento.
 - **Escopo do domínio:** sem catálogo de fornecedores nem conversão de unidades; o mesmo código de fornecedores ou unidades diferentes é recusado, não unificado. Produtos criados antes da migration `20261010220000_add_supplier_origin` têm origem desconhecida e recusam match exato.
 - **Operação:** sem backup/restore com garantia de recuperação, sem recuperação de senha por e-mail, sem Dockerfile de produção. Rollback e encerramento gracioso foram ensaiados localmente, não no serviço publicado.
 - A qualidade do matching foi observada em uma demonstração pequena; não há amostra para medir precisão.
