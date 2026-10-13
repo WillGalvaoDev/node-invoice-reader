@@ -1,5 +1,7 @@
 # Pilot Readiness Roadmap — DocScan
 
+> **Continuidade atual:** seguir o [roadmap do primeiro piloto de demonstração](demo-pilot-roadmap.md). Ele mapeia P0–P6 para as novas milestones e incorpora as pendências de P5-02; a ordem de execução abaixo permanece histórica.
+
 > **Atualização de escopo — 2026-10-10.** Por decisão do responsável, o objetivo atual é uma demonstração de portfólio com IA real. A [especificação da demonstração](portfolio-demo-spec.md) e o [guia](portfolio-demo-guide.md) prevalecem para esta entrega: tetos diários internos desligados por padrão, consumo preservado, sem gate de lançamento comercial. As decisões, estados e restrições anteriores abaixo são histórico do piloto e referência para evolução futura. A ativação comercial exigirá reavaliação explícita.
 
 **Natureza:** originalmente documento de análise e planejamento (r1–r3). A partir de r4, também registra o status real de execução das tarefas à medida que são implementadas — ver §17 e o status de cada tarefa concluída.
