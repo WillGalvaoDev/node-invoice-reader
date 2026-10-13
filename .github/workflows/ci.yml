@@ -61,6 +61,9 @@ jobs:
     # E2E de navegador contra a API real, PostgreSQL efêmero e Gemini determinístico
     # (web/e2e/fake-gemini.mjs). Usa o Chrome do runner; nenhum Gemini real é chamado.
     runs-on: ubuntu-latest
+    env:
+      # Apenas para `prisma generate`; o E2E usa o PostgreSQL efêmero do próprio script.
+      DATABASE_URL: postgresql://e2e_generate:e2e_generate@127.0.0.1:5432/docscan
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
