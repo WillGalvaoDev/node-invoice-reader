@@ -54,7 +54,7 @@ afterEach(async () => {
   })));
 });
 
-describe('D03 — chave de rate limit atrás de Cloudflare + balanceador (duas camadas)', () => {
+describe('D03 — contagem de saltos atrás de Cloudflare + balanceador (comportamento preservado)', () => {
   it('R1 (reproduz a falha): com 1 salto confiável, visitantes distintos pela mesma borda compartilham o limite', async () => {
     const url = await listen(withHops(1));
 
@@ -101,35 +101,100 @@ describe('D03 — chave de rate limit atrás de Cloudflare + balanceador (duas c
   });
 });
 
-describe('D03 — alternativa por lista de proxies confiáveis (documentação executável; não usada pela aplicação)', () => {
-  const CLOUDFLARE_RANGES = ['172.64.0.0/13', '104.16.0.0/13'];
-  const trustListApp = () => limitedApp((app) => {
-    // 'loopback' representa aqui o balanceador do Render (socket do app).
-    app.set('trust proxy', ['loopback', ...CLOUDFLARE_RANGES]);
-  });
+describe('D03 — modo render-cloudflare (confiança posicional + faixas oficiais do Cloudflare)', () => {
+  const app = () => limitedApp((instance) => configureTrustProxy(instance, 0, 'render-cloudflare'));
+  // O limitador agrupa IPv6 por /56 (ipKeyGenerator); os visitantes ficam em /56 distintos.
+  const V6_VISITOR_1 = '2001:db8:1::1';
+  const V6_VISITOR_2 = '2001:db8:2::1';
+  const V6_EDGE = '2606:4700:10::1';
 
-  it('T5: isola visitantes e ignora prefixos forjados sem depender da contagem de saltos', async () => {
-    const url = await listen(trustListApp());
+  it('T5: cadeia normal — visitantes distintos pela mesma borda têm limites independentes (corrige R1)', async () => {
+    const url = await listen(app());
 
     expect(await status(url, chain(VISITOR_1, EDGE_A))).toBe(204);
     expect(await status(url, chain(VISITOR_2, EDGE_A))).toBe(204);
-    expect(await status(url, chain(FORGED_1, VISITOR_1, EDGE_A))).toBe(429);
+  });
+
+  it('T5b: o mesmo visitante em outra borda continua no mesmo limite (corrige R2)', async () => {
+    const url = await listen(app());
+
+    expect(await status(url, chain(VISITOR_1, EDGE_A))).toBe(204);
     expect(await status(url, chain(VISITOR_1, EDGE_B))).toBe(429);
   });
 
-  it('T6: resiste ao caminho sem Cloudflare — o último não confiável é o visitante, não o valor forjado', async () => {
-    const url = await listen(trustListApp());
+  it('T5c: IPv6 — visitante e borda em IPv6 são isolados e estáveis', async () => {
+    const url = await listen(app());
+
+    expect(await status(url, chain(V6_VISITOR_1, V6_EDGE))).toBe(204);
+    expect(await status(url, chain(V6_VISITOR_2, V6_EDGE))).toBe(204);
+    expect(await status(url, chain(V6_VISITOR_1, EDGE_A))).toBe(429);
+  });
+
+  it('T5d: cadeia maliciosa — prefixos forjados (inclusive endereços do Cloudflare forjados) não criam identidade', async () => {
+    const url = await listen(app());
+
+    expect(await status(url, chain(VISITOR_1, EDGE_A))).toBe(204);
+    expect(await status(url, chain(FORGED_1, VISITOR_1, EDGE_A))).toBe(429);
+    expect(await status(url, chain('172.64.0.9', FORGED_2, VISITOR_1, EDGE_B))).toBe(429);
+  });
+
+  it('T6: cadeia incompleta (sem Cloudflare) — a identidade é o visitante, não o valor forjado (fecha T4)', async () => {
+    const url = await listen(app());
 
     expect(await status(url, chain(FORGED_1, VISITOR_1))).toBe(204);
     expect(await status(url, chain(FORGED_2, VISITOR_1))).toBe(429);
+    expect(await status(url, chain(FORGED_1, VISITOR_2))).toBe(204);
   });
 
-  it('T7: um salto extra confiável (por exemplo, outro proxy privado) não desloca a identidade', async () => {
-    const url = await listen(limitedApp((app) => {
-      app.set('trust proxy', ['loopback', 'uniquelocal', ...CLOUDFLARE_RANGES]);
+  it('T6b: cadeia incompleta com endereço do Cloudflare forjado no prefixo continua sem efeito', async () => {
+    const url = await listen(app());
+
+    expect(await status(url, chain('172.64.0.9', VISITOR_1))).toBe(204);
+    expect(await status(url, chain('172.65.0.9', VISITOR_1))).toBe(429);
+  });
+
+  it('T7: borda fora da lista confiável — degrada para o salto do proxy, nunca para valor forjado', async () => {
+    const url = await listen(app());
+    const unknownEdge = '198.51.100.7';
+
+    expect(await status(url, chain(VISITOR_1, unknownEdge))).toBe(204);
+    // Colapsa por borda (comportamento atual de 1 salto), mas o prefixo forjado não ajuda.
+    expect(await status(url, chain(FORGED_1, VISITOR_2, unknownEdge))).toBe(429);
+  });
+
+  it('T7b: rede privada não é confiável — um salto privado em segunda posição é a identidade', async () => {
+    const url = await listen(app());
+
+    expect(await status(url, chain(VISITOR_1, '10.1.2.3'))).toBe(204);
+    expect(await status(url, chain(VISITOR_2, '10.1.2.3'))).toBe(429);
+  });
+
+  it('T8: sem X-Forwarded-For a identidade é o socket', async () => {
+    const url = await listen(app());
+
+    expect(await status(url, {})).toBe(204);
+    expect(await status(url, {})).toBe(429);
+  });
+
+  it('T9: Express 5 chama a função de confiança com (endereço, índice) começando no socket', async () => {
+    const calls: Array<[string, number]> = [];
+    const url = await listen(limitedApp((instance) => {
+      instance.set('trust proxy', (address: string, index: number) => {
+        calls.push([address, index]);
+        return index < 2;
+      });
     }));
 
-    expect(await status(url, chain(VISITOR_1, EDGE_A, '10.1.2.3'))).toBe(204);
-    expect(await status(url, chain(VISITOR_1, EDGE_B))).toBe(429);
+    await status(url, chain(VISITOR_1, EDGE_A));
+
+    // O Express avalia a cadeia mais de uma vez por requisição; cada avaliação começa no socket (0).
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls.map(([, index]) => index).slice(0, 2)).toEqual([0, 1]);
+    expect(calls[0]?.[0]).toMatch(/127\.0\.0\.1$/);
+    expect(calls[1]?.[0]).toBe(EDGE_A);
+  });
+
+  it('recusa combinar o modo com uma contagem de saltos', () => {
+    expect(() => configureTrustProxy(express(), 1, 'render-cloudflare')).toThrow('não pode ser combinado');
   });
 });

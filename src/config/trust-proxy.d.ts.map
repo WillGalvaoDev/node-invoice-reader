@@ -1,1 +1,1 @@
-{"version":3,"file":"trust-proxy.d.ts","sourceRoot":"","sources":["trust-proxy.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,SAAS,CAAC;AAE3C,wBAAgB,mBAAmB,CAAC,GAAG,EAAE,WAAW,EAAE,gBAAgB,EAAE,MAAM,GAAG,IAAI,CAEpF"}
+{"version":3,"file":"trust-proxy.d.ts","sourceRoot":"","sources":["trust-proxy.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,SAAS,CAAC;AAG3C;;;;GAIG;AACH,MAAM,MAAM,cAAc,GAAG,MAAM,GAAG,mBAAmB,CAAC;AAE1D,wBAAgB,mBAAmB,CACjC,GAAG,EAAE,WAAW,EAChB,gBAAgB,EAAE,MAAM,EACxB,IAAI,GAAE,cAAuB,GAC5B,IAAI,CAUN"}

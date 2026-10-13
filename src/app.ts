@@ -1,7 +1,7 @@
 import express, { type RequestHandler } from 'express';
 import type { Logger } from './infra/logger.js';
 import { logger as applicationLogger } from './infra/logger.js';
-import { configureTrustProxy } from './config/trust-proxy.js';
+import { configureTrustProxy, type TrustProxyMode } from './config/trust-proxy.js';
 import { requestIdMiddleware } from './middlewares/request-id.js';
 import { createHttpSecurityMiddlewares } from './middlewares/http-security.js';
 import { createErrorHandler } from './middlewares/error-handler.js';
@@ -28,6 +28,8 @@ interface CreateAppOptions {
   operationalState?: OperationalState;
   logger?: Logger;
   trustProxyHops?: number;
+  /** `hops` (padrão, contagem fixa) ou `render-cloudflare` (D03). */
+  trustProxyMode?: TrustProxyMode;
   allowedOrigins?: readonly string[];
   healthCacheTtlMs?: number;
   healthRateLimiter?: RequestHandler;
@@ -43,6 +45,7 @@ export function createApp({
   operationalState = createOperationalState(),
   logger = applicationLogger,
   trustProxyHops = 0,
+  trustProxyMode = 'hops',
   allowedOrigins = [],
   healthCacheTtlMs = 5_000,
   healthRateLimiter = createHealthRateLimiter(),
@@ -62,7 +65,7 @@ export function createApp({
     await pendingHealthProbe;
   };
 
-  configureTrustProxy(app, trustProxyHops);
+  configureTrustProxy(app, trustProxyHops, trustProxyMode);
   app.use(requestIdMiddleware);
   app.use(...createHttpSecurityMiddlewares(allowedOrigins));
 

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import type { TrustProxyMode } from './trust-proxy.js';
 type Environment = NodeJS.ProcessEnv | Record<string, string | undefined>;
 export declare function createEnv(environment: Environment): {
     DATABASE_URL: string;
@@ -9,6 +10,7 @@ export declare function createEnv(environment: Environment): {
     GEMINI_TIMEOUT_MS: number;
     GEMINI_MAX_ATTEMPTS: number;
     TRUST_PROXY_HOPS: number;
+    TRUST_PROXY_MODE: TrustProxyMode;
     CORS_ALLOWED_ORIGINS: string[];
     REQUEST_TIMEOUT_MS: number;
     SHUTDOWN_TIMEOUT_MS: number;
@@ -32,6 +34,7 @@ export declare const env: {
     GEMINI_TIMEOUT_MS: number;
     GEMINI_MAX_ATTEMPTS: number;
     TRUST_PROXY_HOPS: number;
+    TRUST_PROXY_MODE: TrustProxyMode;
     CORS_ALLOWED_ORIGINS: string[];
     REQUEST_TIMEOUT_MS: number;
     SHUTDOWN_TIMEOUT_MS: number;

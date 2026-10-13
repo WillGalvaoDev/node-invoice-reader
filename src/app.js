@@ -13,7 +13,7 @@ export function createOperationalState() {
         beginShutdown: () => { shuttingDown = true; },
     };
 }
-export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), webDistDir, releaseInfo, }) {
+export function createApp({ applicationRoutes, healthProbe, operationalState = createOperationalState(), logger = applicationLogger, trustProxyHops = 0, trustProxyMode = 'hops', allowedOrigins = [], healthCacheTtlMs = 5_000, healthRateLimiter = createHealthRateLimiter(), webDistDir, releaseInfo, }) {
     const app = express();
     let healthyUntil = 0;
     let pendingHealthProbe;
@@ -25,7 +25,7 @@ export function createApp({ applicationRoutes, healthProbe, operationalState = c
             .finally(() => { pendingHealthProbe = undefined; });
         await pendingHealthProbe;
     };
-    configureTrustProxy(app, trustProxyHops);
+    configureTrustProxy(app, trustProxyHops, trustProxyMode);
     app.use(requestIdMiddleware);
     app.use(...createHttpSecurityMiddlewares(allowedOrigins));
     const rejectHealthDuringShutdown = (_request, response, next) => {

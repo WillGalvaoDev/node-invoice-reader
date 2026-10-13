@@ -110,3 +110,31 @@ Convenções: "painel" = painel do Render/Neon (acesso do operador); "banco" = c
 - **Logs:** estruturados e redigidos (chaves sensíveis por nome); não contêm documento, `accessKey`, senha, JWT nem convite. Ao compartilhar evidência, usar apenas IDs de correlação e categorias.
 - **Material público:** capturas e vídeos só com dados sintéticos; nunca mostrar painel com variáveis de ambiente, URLs de banco ou o convite.
 - **Escalonar se:** aparecer documento, chave ou credencial em log — tratar como incidente de segurança e rotacionar o segredo afetado.
+
+## 10. Identidade do visitante atrás do Render (D03)
+
+**Problema.** O Render recebe o tráfego pelo Cloudflare e por um balanceador próprio. Com `TRUST_PROXY_HOPS=1`, o limitador usa a borda do Cloudflare como identidade (visitantes compartilham baldes; um visitante cai em baldes diferentes). Com `2`, a cadeia completa funciona, mas um pedido que chegue sem o Cloudflare permite que um valor forjado de `X-Forwarded-For` vire a identidade.
+
+**Modo `TRUST_PROXY_MODE=render-cloudflare`** (`src/config/trusted-proxies.ts`):
+
+| Posição na cadeia | Confiança |
+|---|---|
+| 0 — socket (roteamento do Render) | confiável **por posição**; a faixa não é documentada e redes privadas não são confiadas |
+| 1 — último item do `X-Forwarded-For` | confiável **somente** se estiver nas faixas oficiais do Cloudflare |
+| demais | nunca avaliados: o primeiro endereço não confiável é o visitante |
+
+**Premissas (a reavaliar se mudarem):** serviço público `*.onrender.com`, sem domínio próprio nem outro proxy; o Render só entrega pedidos pelo seu roteamento (documentação: serviço "not directly reachable via the public internet"); a cadeia é Cloudflare → balanceador do Render → app (descrita em artigos da Render, **sem garantia contratual**). O modo só inicia com `RENDER=true`.
+
+**Falhas seguras:** borda fora da lista → identidade = a borda (comportamento de 1 salto: colapsa, não permite forjar); cadeia sem Cloudflare → identidade = o último salto real.
+
+**Atualizar as faixas do Cloudflare** (revisar a cada trimestre ou quando o aceite A3 acusar colapso):
+1. `node scripts/check-cloudflare-ips.mjs` (exit 0 = idênticas, 1 = divergem).
+2. Se divergir, atualizar `src/config/cloudflare-ip-ranges.ts`, a data `CLOUDFLARE_IP_RANGES_FETCHED_AT` e as contagens em `trusted-proxies.spec.ts`; `npm run build`, testes e `verify:artifacts`.
+
+**Ativar / validar (somente com `GET /version`, sem login — limite de 60/min por identidade):**
+1. Implantar a release que contém o modo e, no painel, definir `TRUST_PROXY_MODE=render-cloudflare`, **removendo** `TRUST_PROXY_HOPS` (ou `0`).
+2. A1: 15 requisições do mesmo cliente → `RateLimit-Remaining` estritamente decrescente (um único balde).
+3. A2: com `X-Forwarded-For` forjado variável o contador continua na mesma sequência.
+4. A3: um segundo IP real (outra rede) começa em 59 enquanto o primeiro está mais baixo.
+5. A4: após a janela, login normal responde 200 (não 429).
+6. Rollback: remover `TRUST_PROXY_MODE` e restaurar `TRUST_PROXY_HOPS=1` (valor anterior).

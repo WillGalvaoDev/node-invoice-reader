@@ -48,6 +48,7 @@ describe('configuração da aplicação', () => {
       GEMINI_TIMEOUT_MS: 30_000,
       GEMINI_MAX_ATTEMPTS: 2,
       TRUST_PROXY_HOPS: 0,
+      TRUST_PROXY_MODE: 'hops',
       CORS_ALLOWED_ORIGINS: [],
       REQUEST_TIMEOUT_MS: 120_000,
       SHUTDOWN_TIMEOUT_MS: 30_000,
@@ -162,6 +163,45 @@ describe('configuração da aplicação', () => {
     expect(createEnv({ ...required, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
     expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '-1' })).toThrow('TRUST_PROXY_HOPS');
     expect(() => createEnv({ ...required, TRUST_PROXY_HOPS: '11' })).toThrow('TRUST_PROXY_HOPS');
+  });
+
+  describe('TRUST_PROXY_MODE (D03)', () => {
+    const required = {
+      DATABASE_URL: 'postgresql://localhost/docscan',
+      JWT_SECRET: VALID_JWT_SECRET,
+      GEMINI_API_KEY: 'gemini-key',
+      INVITE_CODE: VALID_INVITE_CODE,
+    };
+
+    it('usa contagem de saltos quando ausente e preserva TRUST_PROXY_HOPS', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(createEnv(required)).toMatchObject({ TRUST_PROXY_MODE: 'hops', TRUST_PROXY_HOPS: 0 });
+      expect(createEnv({ ...required, TRUST_PROXY_MODE: '', TRUST_PROXY_HOPS: '1' }))
+        .toMatchObject({ TRUST_PROXY_MODE: 'hops', TRUST_PROXY_HOPS: 1 });
+      expect(createEnv({ ...required, TRUST_PROXY_MODE: 'hops', TRUST_PROXY_HOPS: '2' }))
+        .toMatchObject({ TRUST_PROXY_MODE: 'hops', TRUST_PROXY_HOPS: 2 });
+    });
+
+    it('aceita render-cloudflare somente dentro do Render (RENDER=true)', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(createEnv({ ...required, TRUST_PROXY_MODE: 'render-cloudflare', RENDER: 'true' }))
+        .toMatchObject({ TRUST_PROXY_MODE: 'render-cloudflare', TRUST_PROXY_HOPS: 0 });
+      expect(() => createEnv({ ...required, TRUST_PROXY_MODE: 'render-cloudflare' }))
+        .toThrow('TRUST_PROXY_MODE=render-cloudflare exige execução no Render');
+      expect(() => createEnv({ ...required, TRUST_PROXY_MODE: 'render-cloudflare', RENDER: 'false' }))
+        .toThrow('TRUST_PROXY_MODE=render-cloudflare exige execução no Render');
+    });
+
+    it('recusa valores desconhecidos e a combinação com TRUST_PROXY_HOPS', async () => {
+      const { createEnv } = await import('./env.js');
+
+      expect(() => createEnv({ ...required, TRUST_PROXY_MODE: 'cloudflare' }))
+        .toThrow('Variável de ambiente inválida: TRUST_PROXY_MODE');
+      expect(() => createEnv({ ...required, TRUST_PROXY_MODE: 'render-cloudflare', RENDER: 'true', TRUST_PROXY_HOPS: '1' }))
+        .toThrow('TRUST_PROXY_MODE=render-cloudflare não pode ser combinado com TRUST_PROXY_HOPS');
+    });
   });
 
   it('limita itens por DANFE com default 100 (D1) e valida a faixa 1-1000', async () => {

@@ -20,6 +20,7 @@ export function startApplication() {
     operationalState,
     logger,
     trustProxyHops: env.TRUST_PROXY_HOPS,
+    trustProxyMode: env.TRUST_PROXY_MODE,
     allowedOrigins: env.CORS_ALLOWED_ORIGINS,
     webDistDir: WEB_DIST_DIR,
     releaseInfo: readReleaseInfo(

@@ -18,6 +18,7 @@ export function startApplication() {
         operationalState,
         logger,
         trustProxyHops: env.TRUST_PROXY_HOPS,
+        trustProxyMode: env.TRUST_PROXY_MODE,
         allowedOrigins: env.CORS_ALLOWED_ORIGINS,
         webDistDir: WEB_DIST_DIR,
         releaseInfo: readReleaseInfo({ RENDER_GIT_COMMIT: env.RENDER_GIT_COMMIT, RELEASE_SHA: env.RELEASE_SHA }, WEB_DIST_DIR),

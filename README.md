@@ -161,7 +161,8 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 | `GEMINI_API_KEY` | sim | — | Google Gemini. |
 | `INVITE_CODE` | sim | — | Código de convite compartilhado exigido em `POST /users` (P4-03). Mínimo de **8 caracteres**. Nunca versionado; trocar exige só reiniciar o serviço, sem novo build. |
 | `PORT` | não | `3333` | Porta HTTP. |
-| `TRUST_PROXY_HOPS` | não | `0` | Número exato de proxies reversos confiáveis (0–10). Só alterar se a API estiver atrás de proxy conhecido. |
+| `TRUST_PROXY_HOPS` | não | `0` | Número exato de proxies reversos confiáveis (0–10), usado com `TRUST_PROXY_MODE=hops`. Só alterar se a API estiver atrás de proxy conhecido. **Atrás de Cloudflare + balanceador (Render), `1` usa a borda do Cloudflare como identidade e `2` aceita valor forjado se a cadeia vier incompleta** — preferir `TRUST_PROXY_MODE`. |
+| `TRUST_PROXY_MODE` | não | `hops` | `hops` (contagem fixa, comportamento original) ou `render-cloudflare`: confia no socket por posição (roteamento do Render) e no último salto do `X-Forwarded-For` somente se for uma borda do Cloudflare (faixas em `src/config/cloudflare-ip-ranges.ts`). Exige `RENDER=true` (definido pelo Render) e `TRUST_PROXY_HOPS` ausente/`0`; qualquer outro valor falha no boot. Detalhes e premissas: `docs/demo-operations-runbook.md` §10. |
 | `CORS_ALLOWED_ORIGINS` | não | vazio | Allowlist HTTP(S) separada por vírgula. Sem wildcard, sem credenciais. |
 | `REQUEST_TIMEOUT_MS` | não | `120000` | Timeout de requisição do servidor HTTP. |
 | `SHUTDOWN_TIMEOUT_MS` | não | `30000` | Prazo do graceful shutdown antes de forçar. |

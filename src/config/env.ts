@@ -1,5 +1,7 @@
 import 'dotenv/config';
 
+import type { TrustProxyMode } from './trust-proxy.js';
+
 type Environment = NodeJS.ProcessEnv | Record<string, string | undefined>;
 
 function required(environment: Environment, name: string): string {
@@ -79,6 +81,25 @@ function parseBoolean(value: string | undefined, defaultValue: boolean, name: st
   throw new Error(`Variável de ambiente inválida: ${name}`);
 }
 
+const TRUST_PROXY_MODES: readonly TrustProxyMode[] = ['hops', 'render-cloudflare'];
+
+function parseTrustProxyMode(environment: Environment, hops: number): TrustProxyMode {
+  const value = environment.TRUST_PROXY_MODE?.trim();
+  if (!value) return 'hops';
+  const mode = TRUST_PROXY_MODES.find((candidate) => candidate === value);
+  if (!mode) throw new Error('Variável de ambiente inválida: TRUST_PROXY_MODE');
+  if (mode === 'render-cloudflare') {
+    // Premissa de infraestrutura: o modo confia no socket por posição (ver trusted-proxies.ts).
+    if (environment.RENDER !== 'true') {
+      throw new Error('Variável de ambiente inválida: TRUST_PROXY_MODE=render-cloudflare exige execução no Render (RENDER=true).');
+    }
+    if (hops !== 0) {
+      throw new Error('Variável de ambiente inválida: TRUST_PROXY_MODE=render-cloudflare não pode ser combinado com TRUST_PROXY_HOPS.');
+    }
+  }
+  return mode;
+}
+
 function parseCorsAllowedOrigins(value: string | undefined): string[] {
   if (value === undefined || value.trim() === '') return [];
 
@@ -103,6 +124,7 @@ function parseCorsAllowedOrigins(value: string | undefined): string[] {
 }
 
 export function createEnv(environment: Environment) {
+  const trustProxyHops = parseIntegerInRange(environment.TRUST_PROXY_HOPS, 0, 'TRUST_PROXY_HOPS', 0, 10);
   return {
     DATABASE_URL: required(environment, 'DATABASE_URL'),
     JWT_SECRET: requireJwtSecret(environment),
@@ -113,7 +135,8 @@ export function createEnv(environment: Environment) {
     PORT: parsePort(environment.PORT),
     GEMINI_TIMEOUT_MS: parseIntegerInRange(environment.GEMINI_TIMEOUT_MS, 30_000, 'GEMINI_TIMEOUT_MS', 1_000, 30_000),
     GEMINI_MAX_ATTEMPTS: parseIntegerInRange(environment.GEMINI_MAX_ATTEMPTS, 2, 'GEMINI_MAX_ATTEMPTS', 1, 2),
-    TRUST_PROXY_HOPS: parseIntegerInRange(environment.TRUST_PROXY_HOPS, 0, 'TRUST_PROXY_HOPS', 0, 10),
+    TRUST_PROXY_HOPS: trustProxyHops,
+    TRUST_PROXY_MODE: parseTrustProxyMode(environment, trustProxyHops),
     CORS_ALLOWED_ORIGINS: parseCorsAllowedOrigins(environment.CORS_ALLOWED_ORIGINS),
     REQUEST_TIMEOUT_MS: parseIntegerInRange(environment.REQUEST_TIMEOUT_MS, 120_000, 'REQUEST_TIMEOUT_MS', 30_000, 300_000),
     SHUTDOWN_TIMEOUT_MS: parseIntegerInRange(environment.SHUTDOWN_TIMEOUT_MS, 30_000, 'SHUTDOWN_TIMEOUT_MS', 1_000, 120_000),
