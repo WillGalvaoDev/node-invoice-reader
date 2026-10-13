@@ -98,10 +98,10 @@ Estados permitidos: não iniciada → em andamento → bloqueada (causa concreta
 | Marco | Estado | Observação |
 |---|---|---|
 | DP-00 | Concluída para a base `90fdfe4` | SHA do Render, URL/health e migrations informados/verificados; flags opcionais remotas passam ao gate DP-04 |
-| DP-01 | Concluída localmente | Sem commit; gates locais verdes |
-| DP-02 | Concluída localmente | Sem commit; gates locais verdes |
-| DP-03 | Concluída localmente | Sem commit; E2E local verde; CI web ainda não executado |
-| DP-04 | Bloqueada (hospedado) | Local: `/version`, smoke sem IA, ensaio isolado de reconstrução e rollback, runbook |
+| DP-01 | Concluída | Commitada e publicada; CI verde |
+| DP-02 | Concluída | Commitada e publicada; CI verde (rotas `/demo` ainda desabilitadas no serviço) |
+| DP-03 | Concluída | Commitada e publicada; E2E local e CI (`web`, `web-e2e`) verdes |
+| DP-04 | Parcial: publicada, bloqueada por configuração | Release `7b39a57` no ar (API e web com o mesmo SHA, CI verde). `DEMO_ENABLED` não está habilitada no painel; smoke autenticado, medições e rollback público pendentes |
 | DP-05 | Bloqueada | Depende de DP-04 e de execução com Gemini real hospedado |
 
 Definition of Done do piloto (§6): **nenhum item pode ser marcado**. Itens com cobertura local automatizada (isolamento entre contas, confirmação/rejeição sem dupla movimentação, 429/duplicata/conflito) ainda exigem o aceite hospedado. Nada foi commitado, publicado nem alterado em serviço hospedado nesta etapa.
