@@ -2,7 +2,7 @@ import type { ProductSimilaritySuggestion } from '@prisma/client';
 import { prisma } from '../infra/prisma.js';
 import { AppError } from '../errors/app-error.js';
 import type { IProductSimilaritySuggestion, IProductSuggestionDecision, IProductSuggestionRepository } from './product-suggestion.repository.js';
-import { upsertWeightedProductEntry } from './prisma-weighted-product-entry.js';
+import { insertNewProductEntry, upsertWeightedProductEntry } from './prisma-weighted-product-entry.js';
 
 function toDomain(raw: ProductSimilaritySuggestion): IProductSimilaritySuggestion {
   return {
@@ -16,6 +16,7 @@ function toDomain(raw: ProductSimilaritySuggestion): IProductSimilaritySuggestio
     receivedQuantity: Number(raw.receivedQuantity),
     receivedUnitPrice: Number(raw.receivedUnitPrice),
     unitMeasurement: raw.unitMeasurement,
+    receivedSupplierCnpj: raw.receivedSupplierCnpj,
     confidence: Number(raw.confidence),
     reason: raw.reason,
     status: raw.status,
@@ -70,7 +71,7 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
         totalPrice: Number(suggestion.receivedQuantity) * Number(suggestion.receivedUnitPrice),
         stockId: suggestion.stockId,
         userId,
-      });
+      }, { requireSameOrigin: false });
       if (product.id !== suggestion.suggestedProductId) {
         throw new AppError('Sugestão incompatível com o produto.', 409);
       }
@@ -94,16 +95,8 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
 
       const suggestion = await transaction.productSimilaritySuggestion.findUniqueOrThrow({ where: { id } });
 
-      const existingProduct = await transaction.product.findUnique({
-        where: { stockId_code: { stockId: suggestion.stockId, code: suggestion.receivedCode } },
-      });
-      const previousProduct = existingProduct ? {
-        quantity: Number(existingProduct.quantity),
-        unitPrice: Number(existingProduct.unitPrice),
-        totalPrice: Number(existingProduct.totalPrice),
-      } : null;
-
-      const product = await upsertWeightedProductEntry(transaction, {
+      // Rejeitar cria um produto novo: código já ocupado nunca acumula em silêncio (DP-01).
+      const product = await insertNewProductEntry(transaction, {
         code: suggestion.receivedCode,
         description: suggestion.receivedDescription,
         quantity: Number(suggestion.receivedQuantity),
@@ -112,15 +105,13 @@ export class PrismaProductSuggestionRepository implements IProductSuggestionRepo
         totalPrice: Number(suggestion.receivedQuantity) * Number(suggestion.receivedUnitPrice),
         stockId: suggestion.stockId,
         userId,
+        sourceSupplierCnpj: suggestion.receivedSupplierCnpj,
       });
-      if (product.id === suggestion.suggestedProductId) {
-        throw new AppError('A rejeição não pode alterar o produto sugerido.', 409);
-      }
 
       return {
         suggestion: toDomain(suggestion),
         productId: product.id,
-        previousProduct,
+        previousProduct: null,
         nextProduct: { quantity: Number(product.quantity), unitPrice: Number(product.unitPrice), totalPrice: Number(product.totalPrice) },
       };
     });

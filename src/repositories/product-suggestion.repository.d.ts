@@ -10,6 +10,7 @@ export interface IProductSimilaritySuggestion {
     receivedQuantity: number;
     receivedUnitPrice: number;
     unitMeasurement: string;
+    receivedSupplierCnpj: string | null;
     confidence: number;
     reason: string;
     status: ProductSuggestionStatus;

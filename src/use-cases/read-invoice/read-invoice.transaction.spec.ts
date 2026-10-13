@@ -98,5 +98,6 @@ describe('ReadInvoiceUseCase transaction phases', () => {
 
     expect(ai.extractDanfeData).not.toHaveBeenCalled();
     expect(persistence.persist).not.toHaveBeenCalled();
+    expect(storage.deleteFile).toHaveBeenCalledWith('/tmp/invoice');
   });
 });

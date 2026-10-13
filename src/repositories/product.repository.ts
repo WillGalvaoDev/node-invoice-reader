@@ -10,6 +10,8 @@ export interface IProduct {
   totalPrice: number;
   stockId: string;
   userId?: string | null;
+  /** CNPJ normalizado do fornecedor que originou o produto; nulo em registros legados. */
+  sourceSupplierCnpj?: string | null;
   createdAt?: Date;
 }
 

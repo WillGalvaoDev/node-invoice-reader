@@ -101,7 +101,9 @@ outro produz chaves diferentes de 44 dígitos. O manifesto gerado contém o resu
 esperado. O gerador só escreve arquivos locais, sem chamar IA nem alterar banco.
 
 Se repetir no mesmo estoque, as quantidades somam; os números do roteiro pressupõem
-estoque inicialmente vazio. Não excluir notas processadas para simular novidade.
+estoque inicialmente vazio. Um código já cadastrado só acumula com o mesmo fornecedor
+(CNPJ) e a mesma unidade; do contrário a nota é recusada com 422 e nada é gravado.
+Não excluir notas processadas para simular novidade.
 
 ## Evidência obtida em 2026-10-10
 

@@ -119,6 +119,9 @@ model Product {
   totalPrice      Decimal  @db.Decimal(12, 2)
   createdAt       DateTime @default(now())
 
+  // Origem conhecida (DP-01): CNPJ normalizado do fornecedor da nota. Nulo = legado desconhecido.
+  sourceSupplierCnpj String?
+
   // Relacionamento com Estoque
   stockId String
   stock   Stock  @relation(fields: [stockId], references: [id], onDelete: Cascade)
@@ -150,6 +153,7 @@ model ProductSimilaritySuggestion {
   receivedQuantity    Decimal                 @db.Decimal(12, 4)
   receivedUnitPrice   Decimal                 @db.Decimal(12, 2)
   unitMeasurement     String
+  receivedSupplierCnpj String? // Rastreabilidade da origem recebida (DP-01)
   confidence          Decimal                 @db.Decimal(5, 4)
   reason              String
   status              ProductSuggestionStatus @default(PENDING)

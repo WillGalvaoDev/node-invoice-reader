@@ -26,7 +26,7 @@ export class PrismaInvoicePersistenceRepository implements IInvoicePersistenceRe
       }
 
       for (const { product } of operations) {
-        const persisted = await upsertWeightedProductEntry(transaction, product);
+        const persisted = await upsertWeightedProductEntry(transaction, product, { requireSameOrigin: true });
         products.push(ProductMapper.toDomain(persisted));
       }
 

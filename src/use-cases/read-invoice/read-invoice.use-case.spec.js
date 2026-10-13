@@ -127,7 +127,8 @@ describe('ReadInvoiceUseCase', () => {
             unitPrice: 2.00,
             totalPrice: 20.00,
             stockId: 'stock-1',
-            userId: 'user-any-id'
+            userId: 'user-any-id',
+            sourceSupplierCnpj: '11222333000181',
         };
         productRepositoryMock.findByCode.mockImplementation((code) => {
             if (code === '0982')

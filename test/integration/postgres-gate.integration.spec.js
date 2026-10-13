@@ -68,6 +68,8 @@ function product(stockId, code, quantity, overrides = {}) {
         unitPrice: 10,
         totalPrice: 10 * quantity,
         stockId,
+        // Origem conhecida (DP-01): igual ao fornecedor das notas sintéticas deste gate.
+        sourceSupplierCnpj: '11222333000181',
         ...overrides,
     };
 }
@@ -469,7 +471,7 @@ describe('PostgreSQL Integration Gate', () => {
         const suggestion = {
             id: crypto.randomUUID(), itemIndex: 0, suggestedProductId: candidate.id,
             receivedCode: 'ROLLBACK-SUGGESTION', receivedDescription: 'Produto', receivedQuantity: 2,
-            receivedUnitPrice: 7, unitMeasurement: 'UN', confidence: 0.8, reason: 'similar',
+            receivedUnitPrice: 7, unitMeasurement: 'UN', receivedSupplierCnpj: '11222333000181', confidence: 0.8, reason: 'similar',
         };
         await expect(persistence.persist({
             accessKey, stockId: stock.id,

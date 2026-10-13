@@ -13,6 +13,7 @@ export interface IInvoiceSuggestionOperation {
   receivedQuantity: number;
   receivedUnitPrice: number;
   unitMeasurement: string;
+  receivedSupplierCnpj: string;
   confidence: number;
   reason: string;
 }

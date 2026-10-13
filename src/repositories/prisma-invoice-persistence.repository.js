@@ -21,7 +21,7 @@ export class PrismaInvoicePersistenceRepository {
                 throw error;
             }
             for (const { product } of operations) {
-                const persisted = await upsertWeightedProductEntry(transaction, product);
+                const persisted = await upsertWeightedProductEntry(transaction, product, { requireSameOrigin: true });
                 products.push(ProductMapper.toDomain(persisted));
             }
             if (suggestions.length > 0) {

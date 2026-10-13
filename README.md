@@ -1,5 +1,7 @@
 # DocScan — Leitura Inteligente de DANFE
 
+**Próximas entregas:** [roadmap do primeiro piloto de demonstração](docs/demo-pilot-roadmap.md), com milestones, objetivos, testes e guias de implementação. O plano distingue a base já implementada das entregas ainda pendentes.
+
 > **Escopo atual (2026-10-10): demonstração de portfólio com IA real.** Tetos diários internos desligados por padrão; medição de consumo preservada. Veja a [especificação](docs/portfolio-demo-spec.md) e o [guia com PDFs e evidência real](docs/portfolio-demo-guide.md). O roadmap de piloto comercial permanece como histórico e evolução futura.
 
 Backend em **Node.js** + **TypeScript** que processa DANFEs (Documento Auxiliar da Nota Fiscal Eletrônica) brasileiras: extrai dados via IA, valida contra as regras do domínio fiscal, casa itens com o catálogo existente e atualiza o estoque com auditoria best-effort (uma falha de auditoria não reverte a operação).
@@ -65,12 +67,12 @@ Autorização é sempre derivada do recurso, nunca do corpo/query da requisiçã
 
 ### Upload e pipeline de IA
 
-1. `multer` valida tamanho (10 MiB) e MIME (`image/jpeg`, `image/png`, `application/pdf`) antes do controller.
+1. `multer` valida tamanho (10 MiB) e MIME (`image/jpeg`, `image/png`, `application/pdf`) antes do controller; em seguida os primeiros bytes do arquivo são conferidos contra o tipo declarado (assinatura JPEG/PNG/`%PDF-`) e divergência responde `415` com remoção do temporário. É verificação de assinatura, não prova de que o arquivo é legível ou legítimo.
 2. Autorização de acesso ao estoque acontece **antes** de qualquer I/O — inclusive antes da leitura do arquivo do disco.
 3. `IStorageProvider.readFile` lê os bytes (`Buffer`); `IAiProvider.extractDanfeData` recebe conteúdo + mimetype, nunca um caminho de arquivo.
 4. Gemini extrai os dados com timeout de 30s, no máximo 2 tentativas (retry para timeout/`5xx`/erro de rede; nunca para `429`), e a resposta é validada por schema `zod` — nada do modelo é confiado sem validação de tipo/estrutura.
 5. Coerência do DANFE é verificada (soma dos itens vs. total declarado, tolerância `max(R$0,02, 1%)`) antes de qualquer persistência.
-6. Matching: item com código exato atualiza o produto automaticamente. Sem código exato, um pré-filtro determinístico (léxico, sem IA) reduz o catálogo a no máximo 15 candidatos; só então o Gemini é chamado para similaridade — nunca com o estoque inteiro.
+6. Matching: item com código exato atualiza o produto automaticamente **somente se a origem (CNPJ do fornecedor) e a unidade forem as mesmas**; código existente com outro fornecedor, outra unidade (`UN` × `CX` não são convertidas) ou origem legada desconhecida aborta a nota com `422`, sem escrita, em vez de somar quantidades incompatíveis. A regra é revalidada dentro da transação (`ON CONFLICT ... WHERE`), inclusive sob concorrência. Sem código exato, um pré-filtro determinístico (léxico, sem IA) reduz o catálogo a no máximo 15 candidatos; só então o Gemini é chamado para similaridade — nunca com o estoque inteiro.
 7. O resultado da similaridade tem **três estados distinguíveis pelo tipo** — `match`, `no_match` e `unavailable` — e nunca `null`. Ver [Indisponibilidade do matching](#indisponibilidade-do-matching) abaixo.
 8. Toda a persistência de uma nota (upsert de produtos com custo médio ponderado, criação de sugestões, `ProcessedInvoice`) acontece em **uma única transação Postgres**. Reenvio da mesma chave de acesso é idempotente (`409` em duplicata).
 
@@ -93,7 +95,8 @@ Autorização é sempre derivada do recurso, nunca do corpo/query da requisiçã
 Quando a IA identifica um candidato por similaridade (confiança configurável via `SIMILARITY_CONFIDENCE_THRESHOLD`, default `0.7`), o item **não altera o estoque**. Uma `ProductSimilaritySuggestion` fica `PENDING` até decisão humana via `/suggestions/:id/confirm` ou `/suggestions/:id/reject`:
 
 * **Confirmar** aplica a entrada (custo médio ponderado) no produto sugerido.
-* **Rejeitar** preserva o candidato e cadastra o item recebido como produto novo.
+* **Rejeitar** preserva o candidato e cadastra o item recebido como produto novo. Se o código recebido já estiver ocupado no estoque, responde `409` e a sugestão continua pendente.
+* **Confirmar** com unidade incompatível responde `422` e a sugestão continua pendente. A origem do produto confirmado é preservada; a recebida fica na sugestão para rastreabilidade.
 
 A transição `PENDING → CONFIRMED|REJECTED` é condicional (`WHERE status = PENDING`) para impedir decisão dupla sob concorrência.
 
@@ -171,6 +174,7 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 
 ## Limitações conhecidas
 
+* Não há catálogo de fornecedores nem conversão de unidades: o mesmo código de dois fornecedores, ou em unidades diferentes, é recusado (`422`), não unificado. Produtos criados antes da migration `20261010220000_add_supplier_origin` têm origem desconhecida e também recusam match exato até serem recriados (o ambiente sintético é descartável).
 * Não há Dockerfile de produção — o build de produção é validado no CI instalando só `dependencies`, mas não há imagem publicada.
 * Otimização em lote do matching permanece adiada. Há evidência de uma demonstração real pequena (guia), sem amostra suficiente para calibrar qualidade ou escala.
 * `TRUST_PROXY_HOPS` e `CORS_ALLOWED_ORIGINS` têm defaults seguros para instância única sem proxy; ajustar antes de colocar atrás de load balancer/CDN.

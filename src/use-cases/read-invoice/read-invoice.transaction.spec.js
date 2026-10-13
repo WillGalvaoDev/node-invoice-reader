@@ -81,6 +81,7 @@ describe('ReadInvoiceUseCase transaction phases', () => {
             .rejects.toMatchObject({ statusCode: 403 });
         expect(ai.extractDanfeData).not.toHaveBeenCalled();
         expect(persistence.persist).not.toHaveBeenCalled();
+        expect(storage.deleteFile).toHaveBeenCalledWith('/tmp/invoice');
     });
 });
 //# sourceMappingURL=read-invoice.transaction.spec.js.map

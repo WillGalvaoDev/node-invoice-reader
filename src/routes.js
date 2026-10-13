@@ -31,7 +31,7 @@ import { CreateCompanyController } from './controllers/create-company.controller
 import { PrismaCompanyRepository } from './repositories/prisma-company.repository.js';
 import { PrismaStockRepository } from './repositories/prisma-stock.repository.js';
 import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoice-persistence.repository.js';
-import { invoiceUpload } from './middlewares/invoice-upload.js';
+import { invoiceFileUpload } from './middlewares/invoice-upload.js';
 import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
 import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
 import { companyStocksParamsSchema, createCompanyBodySchema, listCompaniesQuerySchema, listCompanyStocksQuerySchema, listProductsQuerySchema, loginBodySchema, registerUserBodySchema, stockSuggestionParamsSchema, suggestionDecisionParamsSchema, emptyCommandBodySchema, changePasswordBodySchema, } from './schemas/http.schemas.js';
@@ -106,7 +106,7 @@ export const routes = createRoutes({
     userRegistrationRateLimiter,
     changePasswordRateLimiter,
     createCompanyRateLimiter,
-    invoiceUpload: invoiceUpload.single('file'),
+    invoiceUpload: invoiceFileUpload(),
     controllers: {
         registerUser: registerUserController,
         login: loginController,

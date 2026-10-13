@@ -13,6 +13,7 @@ export class InMemoryProductRepository {
             totalPrice: product.totalPrice,
             stockId: product.stockId,
             userId: product.userId ?? null,
+            sourceSupplierCnpj: product.sourceSupplierCnpj ?? null,
             createdAt: product.createdAt ?? new Date(),
         };
         this.items.push(newProduct);

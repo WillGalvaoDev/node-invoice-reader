@@ -7,6 +7,7 @@ import { prefilterSimilarityCandidates } from './similarity-candidate-prefilter.
 import { randomUUID } from 'node:crypto';
 import { parseCnpj } from '../../domain/cnpj.js';
 import { assertDanfeCoherence } from '../../domain/danfe-coherence.js';
+import { assertCompatibleProductEntry } from '../../domain/product-origin.js';
 import { aiTelemetry, recordAiTelemetryBestEffort } from '../../infra/ai-telemetry.js';
 export class ReadInvoiceUseCase {
     storageProvider;
@@ -101,6 +102,8 @@ export class ReadInvoiceUseCase {
                 const existingByCode = existingStockProducts.find((product) => product.code === item.code)
                     ?? await this.productRepository.findByCode(item.code, stockId);
                 if (existingByCode) {
+                    // Acúmulo automático só com origem comprovada e unidade iguais (DP-01 / I01).
+                    assertCompatibleProductEntry(existingByCode, { supplierCnpj, unitMeasurement: item.unitMeasurement });
                     if (!auditStateByProductCode.has(item.code)) {
                         auditStateByProductCode.set(item.code, existingByCode);
                     }
@@ -111,6 +114,7 @@ export class ReadInvoiceUseCase {
                             quantity: Number(item.quantity),
                             unitPrice: Number(item.unitPrice),
                             totalPrice: Number(item.totalPrice),
+                            sourceSupplierCnpj: supplierCnpj,
                         },
                     });
                     continue;
@@ -151,6 +155,7 @@ export class ReadInvoiceUseCase {
                         receivedQuantity: Number(item.quantity),
                         receivedUnitPrice: Number(item.unitPrice),
                         unitMeasurement: item.unitMeasurement,
+                        receivedSupplierCnpj: supplierCnpj,
                         confidence: similarity.confidence,
                         reason: similarity.reason,
                     });
@@ -167,6 +172,7 @@ export class ReadInvoiceUseCase {
                     totalPrice: Number(item.totalPrice),
                     stockId,
                     userId: userId ?? null,
+                    sourceSupplierCnpj: supplierCnpj,
                 };
                 operations.push({
                     product: newProduct,

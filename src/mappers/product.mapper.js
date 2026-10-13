@@ -13,6 +13,7 @@ export class ProductMapper {
             createdAt: raw.createdAt,
             stockId: raw.stockId,
             userId: raw.userId,
+            sourceSupplierCnpj: raw.sourceSupplierCnpj,
         };
     }
 }

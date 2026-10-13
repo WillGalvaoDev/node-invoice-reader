@@ -16,6 +16,7 @@ export class PrismaProductRepository {
                     totalPrice: Number(product.totalPrice),
                     stockId: product.stockId,
                     userId: product.userId ?? null,
+                    sourceSupplierCnpj: product.sourceSupplierCnpj ?? null,
                 },
             });
         }
