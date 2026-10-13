@@ -57,7 +57,26 @@ describe('configuração da aplicação', () => {
       GEMINI_QUOTA_ENFORCEMENT_ENABLED: false,
       GEMINI_GLOBAL_REQUESTS_PER_DAY: 18,
       GEMINI_USER_REQUESTS_PER_DAY: 5,
+      DEMO_ENABLED: false,
+      DEMO_COMMANDS_PER_MINUTE: 5,
     });
+  });
+
+  it('mantém o ambiente demo desligado por padrão e valida o limite de comandos', async () => {
+    const { createEnv } = await import('./env.js');
+    const required = { DATABASE_URL: 'postgresql://localhost/docscan', JWT_SECRET: VALID_JWT_SECRET,
+      GEMINI_API_KEY: 'test-key', INVITE_CODE: VALID_INVITE_CODE };
+    for (const value of [undefined, '', 'false']) {
+      expect(createEnv({ ...required, DEMO_ENABLED: value })).toMatchObject({ DEMO_ENABLED: false });
+    }
+    expect(createEnv({ ...required, DEMO_ENABLED: 'true', DEMO_COMMANDS_PER_MINUTE: '12' }))
+      .toMatchObject({ DEMO_ENABLED: true, DEMO_COMMANDS_PER_MINUTE: 12 });
+    for (const value of ['1', 'yes', 'TRUE']) {
+      expect(() => createEnv({ ...required, DEMO_ENABLED: value })).toThrow('DEMO_ENABLED');
+    }
+    for (const value of ['0', '61', 'abc', '1.5']) {
+      expect(() => createEnv({ ...required, DEMO_COMMANDS_PER_MINUTE: value })).toThrow('DEMO_COMMANDS_PER_MINUTE');
+    }
   });
 
   it('desliga tetos por padrão e aceita apenas booleanos explícitos para reativá-los', async () => {

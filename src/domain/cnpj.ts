@@ -21,6 +21,12 @@ function checkDigit(base: string): number {
   return remainder < 2 ? 0 : 11 - remainder;
 }
 
+/** Dois dígitos verificadores (módulo 11) para os 12 primeiros caracteres. */
+export function computeCnpjCheckDigits(base: string): string {
+  const firstDigit = checkDigit(base);
+  return `${firstDigit}${checkDigit(`${base}${firstDigit}`)}`;
+}
+
 export function normalizeCnpj(input: string): string {
   const value = input.trim().toUpperCase();
   if (CANONICAL_CNPJ.test(value)) return value;

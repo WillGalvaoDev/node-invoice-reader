@@ -130,6 +130,10 @@ export function createEnv(environment: Environment) {
     // uma garantia sobre a cota atual do provedor nem uma política comercial futura.
     GEMINI_GLOBAL_REQUESTS_PER_DAY: parseIntegerInRange(environment.GEMINI_GLOBAL_REQUESTS_PER_DAY, 18, 'GEMINI_GLOBAL_REQUESTS_PER_DAY', 1, 20),
     GEMINI_USER_REQUESTS_PER_DAY: parseIntegerInRange(environment.GEMINI_USER_REQUESTS_PER_DAY, 5, 'GEMINI_USER_REQUESTS_PER_DAY', 1, 20),
+    // Ambiente de demonstração (DP-02): rotas /demo existem apenas no serviço demo.
+    DEMO_ENABLED: parseBoolean(environment.DEMO_ENABLED, false, 'DEMO_ENABLED'),
+    // Protege a criação de registros de demo; independente de qualquer cota de IA.
+    DEMO_COMMANDS_PER_MINUTE: parseIntegerInRange(environment.DEMO_COMMANDS_PER_MINUTE, 5, 'DEMO_COMMANDS_PER_MINUTE', 1, 60),
   };
 }
 

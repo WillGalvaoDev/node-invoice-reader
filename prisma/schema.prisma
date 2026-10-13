@@ -23,6 +23,7 @@ model User {
   auditLogs          AuditLog[]
   createdProducts    Product[]                     @relation("CreatedBy")
   decidedSuggestions ProductSimilaritySuggestion[] @relation("SuggestionDecidedBy")
+  demoSessions       DemoSession[]
 
   @@map("users")
 }
@@ -39,6 +40,7 @@ model Company {
   stocks        Stock[]
   collaborators CompanyCollaborator[]
   auditLogs     AuditLog[]
+  demoSessions  DemoSession[]
 
   @@map("companies")
 }
@@ -71,6 +73,7 @@ model Stock {
   auditLogs          AuditLog[]
   processedInvoices  ProcessedInvoice[]
   productSuggestions ProductSimilaritySuggestion[]
+  demoSessions       DemoSession[]
 
   @@unique([companyId, name])
   @@map("stocks")
@@ -259,4 +262,51 @@ model AiUsageLedger {
 
   @@unique([scope, scopeId, periodKind, period])
   @@map("ai_usage_ledger")
+}
+
+enum DemoSessionState {
+  ACTIVE
+  ARCHIVED
+}
+
+enum DemoDocumentKind {
+  INITIAL
+  FOLLOWUP
+}
+
+// Ambiente de demonstração por visitante (DP-02). Dados sintéticos e descartáveis.
+// "Uma sessão ativa por usuário" é garantida por índice único parcial criado na
+// migration (WHERE state = 'ACTIVE'), que o Prisma não consegue expressar aqui.
+model DemoSession {
+  id          String           @id @default(uuid())
+  ownerId     String
+  companyId   String           @unique
+  stockId     String
+  state       DemoSessionState @default(ACTIVE)
+  successorId String?          @unique
+  createdAt   DateTime         @default(now())
+  archivedAt  DateTime?
+
+  owner       User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  stock       Stock              @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  successor   DemoSession?       @relation("DemoSessionSuccessor", fields: [successorId], references: [id])
+  predecessor DemoSession?       @relation("DemoSessionSuccessor")
+  documentKeys DemoDocumentKey[]
+
+  @@index([ownerId, state])
+  @@map("demo_sessions")
+}
+
+// Reserva global das chaves de acesso sintéticas, antes de virarem ProcessedInvoice.
+model DemoDocumentKey {
+  accessKey String           @id
+  sessionId String
+  kind      DemoDocumentKind
+  createdAt DateTime         @default(now())
+
+  session DemoSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, kind])
+  @@map("demo_document_keys")
 }

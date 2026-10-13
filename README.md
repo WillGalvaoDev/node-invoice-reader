@@ -57,6 +57,10 @@ Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status:
 | `GET`  | `/stocks/:stockId/suggestions` | Bearer JWT | Lista sugestões de produto pendentes do estoque. |
 | `POST` | `/suggestions/:suggestionId/confirm` | Bearer JWT | Confirma uma sugestão: aplica a entrada no produto sugerido. |
 | `POST` | `/suggestions/:suggestionId/reject` | Bearer JWT | Rejeita uma sugestão: cadastra o item como produto novo. |
+| `POST` | `/demo/sessions` | Bearer JWT, `DEMO_ENABLED=true`, rate limit `DEMO_COMMANDS_PER_MINUTE`/min por usuário | Prepara (201) ou reutiliza (200) a sessão de demonstração ativa: empresa sintética, estoque vazio e duas chaves de nota exclusivas. Não chama IA nem cria produtos. |
+| `GET`  | `/demo/sessions/current` | Bearer JWT, `DEMO_ENABLED=true` | Sessão ativa do usuário ou `404`. |
+| `GET`  | `/demo/sessions/:sessionId/documents/:kind` | Bearer JWT, `DEMO_ENABLED=true` | PDF sintético (`initial` ou `followup`) com a chave exclusiva da sessão; `Cache-Control: no-store`. `404` igual para sessão alheia e inexistente; `409` se arquivada. |
+| `POST` | `/demo/sessions/:sessionId/restart` | Bearer JWT, `DEMO_ENABLED=true`, mesmo rate limit | Arquiva a sessão e cria sucessora vazia; repetir o mesmo ID devolve a mesma sucessora. |
 | `PATCH` | `/me/password` | Bearer JWT, rate limit 5/min por usuário | Troca a própria senha (`currentPassword`/`newPassword`). `204` sem corpo. Incrementa `authVersion` na mesma escrita do novo hash — todo token emitido antes da troca deixa de ser aceito, imediatamente e sem depender de comparação de timestamp. |
 
 ### Autenticação e tenancy
@@ -147,6 +151,8 @@ Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/e
 | `GEMINI_ENABLED` | não | `true` | Kill switch do guard de orçamento (P4-02). `false` recusa toda chamada de IA com `503` sem `Retry-After` (decisão do operador, não janela de cota) — resto do sistema intacto. |
 | `GEMINI_GLOBAL_REQUESTS_PER_DAY` | não | `18` | Teto global histórico, faixa 1–20. Aplicado somente com enforcement habilitado. |
 | `GEMINI_USER_REQUESTS_PER_DAY` | não | `5` | Teto individual histórico, faixa 1–20. Aplicado somente com enforcement habilitado. |
+| `DEMO_ENABLED` | não | `false` | Registra as rotas `/demo/*` (DP-02). Habilitar somente no serviço de demonstração; desligado, as rotas não existem (`404`). |
+| `DEMO_COMMANDS_PER_MINUTE` | não | `5` | Comandos de preparar/reiniciar sessão por usuário por minuto (1–60). Protege a criação de registros; é independente da cota de IA. |
 
 ---
 

@@ -18,6 +18,8 @@ export declare function createEnv(environment: Environment): {
     GEMINI_QUOTA_ENFORCEMENT_ENABLED: boolean;
     GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
     GEMINI_USER_REQUESTS_PER_DAY: number;
+    DEMO_ENABLED: boolean;
+    DEMO_COMMANDS_PER_MINUTE: number;
 };
 export declare const env: {
     DATABASE_URL: string;
@@ -37,6 +39,8 @@ export declare const env: {
     GEMINI_QUOTA_ENFORCEMENT_ENABLED: boolean;
     GEMINI_GLOBAL_REQUESTS_PER_DAY: number;
     GEMINI_USER_REQUESTS_PER_DAY: number;
+    DEMO_ENABLED: boolean;
+    DEMO_COMMANDS_PER_MINUTE: number;
 };
 export {};
 //# sourceMappingURL=env.d.ts.map

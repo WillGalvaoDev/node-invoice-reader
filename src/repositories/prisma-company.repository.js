@@ -3,6 +3,19 @@ import { AppError } from '../errors/app-error.js';
 import { isPrismaErrorCode } from '../errors/prisma-error.js';
 import { CompanyMapper } from '../mappers/company.mapper.js';
 import { StockMapper } from '../mappers/stock.mapper.js';
+/**
+ * Empresa + estoque padrão dentro de uma transação já aberta. Compartilhada com o
+ * ambiente de demonstração para que a regra de criação exista em um único lugar.
+ */
+export async function createCompanyWithDefaultStockIn(transaction, company, defaultStockName) {
+    const createdCompany = await transaction.company.create({
+        data: { name: company.name, cnpj: company.cnpj, ownerId: company.ownerId },
+    });
+    const createdStock = await transaction.stock.create({
+        data: { name: defaultStockName, companyId: createdCompany.id },
+    });
+    return { company: CompanyMapper.toDomain(createdCompany), stock: StockMapper.toDomain(createdStock) };
+}
 export class PrismaCompanyRepository {
     async create(company) {
         let createdCompany;
@@ -28,22 +41,7 @@ export class PrismaCompanyRepository {
     }
     async createWithDefaultStock(company, defaultStockName) {
         try {
-            return await prisma.$transaction(async (transaction) => {
-                const createdCompany = await transaction.company.create({
-                    data: {
-                        name: company.name,
-                        cnpj: company.cnpj,
-                        ownerId: company.ownerId,
-                    },
-                });
-                const createdStock = await transaction.stock.create({
-                    data: {
-                        name: defaultStockName,
-                        companyId: createdCompany.id,
-                    },
-                });
-                return { company: CompanyMapper.toDomain(createdCompany), stock: StockMapper.toDomain(createdStock) };
-            });
+            return await prisma.$transaction((transaction) => createCompanyWithDefaultStockIn(transaction, company, defaultStockName));
         }
         catch (error) {
             if (isPrismaErrorCode(error, 'P2002')) {

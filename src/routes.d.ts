@@ -10,6 +10,16 @@ export interface CreateRoutesOptions {
     changePasswordRateLimiter: RequestHandler;
     createCompanyRateLimiter: RequestHandler;
     invoiceUpload: RequestHandler;
+    /** Ambiente de demonstração (DP-02). Ausente = rotas /demo não existem. */
+    demo?: {
+        commandRateLimiter: RequestHandler;
+        controllers: {
+            prepare: HttpController;
+            current: HttpController;
+            document: HttpController;
+            restart: HttpController;
+        };
+    };
     controllers: {
         registerUser: HttpController;
         login: HttpController;

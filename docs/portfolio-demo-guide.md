@@ -89,7 +89,15 @@ A chave de acesso é única globalmente no banco. Trocar de usuário ou estoque 
 permite reenviar a mesma chave já processada. Reenvio pode consumir IA antes do
 409, porque a verificação autoritativa de duplicidade acontece na transação final.
 
-Os PDFs prontos não exigem Python para uso. Para gerar outro par:
+No serviço com `DEMO_ENABLED=true`, o par de documentos novo é obtido pela própria API, sem
+Python nem SQL: `POST /demo/sessions` (prepara ou reutiliza a sessão ativa),
+`GET /demo/sessions/:id/documents/initial|followup` (PDF com chaves exclusivas da sessão) e
+`POST /demo/sessions/:id/restart` (arquiva a sessão e entrega estoque vazio e chaves novas).
+Preparar e baixar não chamam IA. Reiniciar não apaga histórico, ledger nem telemetria.
+O contrato completo está em [evidence/DP-02.md](evidence/DP-02.md).
+
+Os PDFs prontos e o gerador Python permanecem como alternativa de desenvolvimento e como
+fixtures de referência. Para gerar outro par localmente:
 
 ```sh
 python -m pip install -r scripts/demo-requirements.txt

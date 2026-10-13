@@ -6,8 +6,8 @@ import { logger, type Logger } from '../../infra/logger.js';
 import { persistAuditBestEffort } from '../best-effort-audit.js';
 import { auditEvents } from '../audit-events.js';
 import { parseCnpj } from '../../domain/cnpj.js';
+import { DEFAULT_STOCK_NAME } from '../../domain/default-stock-name.js';
 
-const DEFAULT_STOCK_NAME = 'Estoque Principal';
 
 interface ICreateCompanyRequest {
   name: string;

@@ -40,6 +40,16 @@ export declare const suggestionDecisionParamsSchema: z.ZodObject<{
     suggestionId: z.ZodString;
 }, z.core.$strict>;
 export declare const emptyCommandBodySchema: z.ZodObject<{}, z.core.$strict>;
+export declare const demoSessionParamsSchema: z.ZodObject<{
+    sessionId: z.ZodString;
+}, z.core.$strict>;
+export declare const demoDocumentParamsSchema: z.ZodObject<{
+    sessionId: z.ZodString;
+    kind: z.ZodEnum<{
+        initial: "initial";
+        followup: "followup";
+    }>;
+}, z.core.$strict>;
 export declare const changePasswordBodySchema: z.ZodObject<{
     currentPassword: z.ZodString;
     newPassword: z.ZodString;

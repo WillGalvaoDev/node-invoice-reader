@@ -34,7 +34,14 @@ import { PrismaInvoicePersistenceRepository } from './repositories/prisma-invoic
 import { invoiceFileUpload } from './middlewares/invoice-upload.js';
 import { loginRateLimiter, userRegistrationRateLimiter } from './middlewares/auth-rate-limiters.js';
 import { validateBody, validateParams, validateQuery } from './middlewares/validate-request.js';
-import { companyStocksParamsSchema, createCompanyBodySchema, listCompaniesQuerySchema, listCompanyStocksQuerySchema, listProductsQuerySchema, loginBodySchema, registerUserBodySchema, stockSuggestionParamsSchema, suggestionDecisionParamsSchema, emptyCommandBodySchema, changePasswordBodySchema, } from './schemas/http.schemas.js';
+import { companyStocksParamsSchema, createCompanyBodySchema, listCompaniesQuerySchema, listCompanyStocksQuerySchema, listProductsQuerySchema, loginBodySchema, registerUserBodySchema, stockSuggestionParamsSchema, suggestionDecisionParamsSchema, emptyCommandBodySchema, changePasswordBodySchema, demoDocumentParamsSchema, demoSessionParamsSchema, } from './schemas/http.schemas.js';
+import { PrismaDemoSessionRepository } from './repositories/prisma-demo-session.repository.js';
+import { PrepareDemoSessionUseCase } from './use-cases/demo/prepare-demo-session.use-case.js';
+import { GetCurrentDemoSessionUseCase } from './use-cases/demo/get-current-demo-session.use-case.js';
+import { GetDemoDocumentUseCase } from './use-cases/demo/get-demo-document.use-case.js';
+import { RestartDemoSessionUseCase } from './use-cases/demo/restart-demo-session.use-case.js';
+import { GetCurrentDemoSessionController, GetDemoDocumentController, PrepareDemoSessionController, RestartDemoSessionController, } from './controllers/demo-session.controllers.js';
+import { createDemoCommandRateLimiter } from './middlewares/demo-command-rate-limiter.js';
 import { PrismaProductSuggestionRepository } from './repositories/prisma-product-suggestion.repository.js';
 import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from './use-cases/product-suggestions/reject-product-suggestion.use-case.js';
@@ -58,6 +65,13 @@ export function createRoutes(options) {
     router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
     router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
     router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
+    if (options.demo) {
+        const { commandRateLimiter, controllers: demo } = options.demo;
+        router.post('/demo/sessions', options.authenticate, commandRateLimiter, validateBody(emptyCommandBodySchema), demo.prepare.handle.bind(demo.prepare));
+        router.get('/demo/sessions/current', options.authenticate, demo.current.handle.bind(demo.current));
+        router.get('/demo/sessions/:sessionId/documents/:kind', options.authenticate, validateParams(demoDocumentParamsSchema), demo.document.handle.bind(demo.document));
+        router.post('/demo/sessions/:sessionId/restart', options.authenticate, commandRateLimiter, validateParams(demoSessionParamsSchema), validateBody(emptyCommandBodySchema), demo.restart.handle.bind(demo.restart));
+    }
     router.patch('/me/password', options.authenticate, options.changePasswordRateLimiter, validateBody(changePasswordBodySchema), controllers.changePassword.handle.bind(controllers.changePassword));
     return router;
 }
@@ -99,8 +113,25 @@ const listCompanyStocksController = new ListCompanyStocksController(new ListComp
 const confirmSuggestionController = new ConfirmProductSuggestionController(new ConfirmProductSuggestionUseCase(productSuggestionRepository, stockRepository, auditLogRepository));
 const rejectSuggestionController = new RejectProductSuggestionController(new RejectProductSuggestionUseCase(productSuggestionRepository, stockRepository, auditLogRepository));
 const listSuggestionsController = new ListPendingProductSuggestionsController(new ListPendingProductSuggestionsUseCase(productSuggestionRepository, stockRepository));
+// INJEÇÃO - DEMONSTRAÇÃO (somente com DEMO_ENABLED=true; caso contrário as rotas não existem)
+function createDemoRoutesOptions() {
+    if (!env.DEMO_ENABLED)
+        return undefined;
+    const demoSessionRepository = new PrismaDemoSessionRepository();
+    return {
+        commandRateLimiter: createDemoCommandRateLimiter(env.DEMO_COMMANDS_PER_MINUTE),
+        controllers: {
+            prepare: new PrepareDemoSessionController(new PrepareDemoSessionUseCase(demoSessionRepository)),
+            current: new GetCurrentDemoSessionController(new GetCurrentDemoSessionUseCase(demoSessionRepository)),
+            document: new GetDemoDocumentController(new GetDemoDocumentUseCase(demoSessionRepository)),
+            restart: new RestartDemoSessionController(new RestartDemoSessionUseCase(demoSessionRepository)),
+        },
+    };
+}
+const demoRoutesOptions = createDemoRoutesOptions();
 export const routes = createRoutes({
     authenticate: ensureAuthenticated,
+    ...(demoRoutesOptions && { demo: demoRoutesOptions }),
     uploadRateLimiter,
     loginRateLimiter,
     userRegistrationRateLimiter,

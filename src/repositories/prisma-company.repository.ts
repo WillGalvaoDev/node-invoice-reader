@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import type { ICompanyRepository, ICompany, ICompanyPage, ICompanyPageQuery } from './company.repository.js';
 import type { IStock } from './stock.repository.js';
 import { prisma } from '../infra/prisma.js';
@@ -5,6 +6,24 @@ import { AppError } from '../errors/app-error.js';
 import { isPrismaErrorCode } from '../errors/prisma-error.js';
 import { CompanyMapper } from '../mappers/company.mapper.js';
 import { StockMapper } from '../mappers/stock.mapper.js';
+
+/**
+ * Empresa + estoque padrão dentro de uma transação já aberta. Compartilhada com o
+ * ambiente de demonstração para que a regra de criação exista em um único lugar.
+ */
+export async function createCompanyWithDefaultStockIn(
+  transaction: Prisma.TransactionClient,
+  company: ICompany,
+  defaultStockName: string,
+): Promise<{ company: ICompany; stock: IStock }> {
+  const createdCompany = await transaction.company.create({
+    data: { name: company.name, cnpj: company.cnpj, ownerId: company.ownerId },
+  });
+  const createdStock = await transaction.stock.create({
+    data: { name: defaultStockName, companyId: createdCompany.id },
+  });
+  return { company: CompanyMapper.toDomain(createdCompany), stock: StockMapper.toDomain(createdStock) };
+}
 
 export class PrismaCompanyRepository implements ICompanyRepository {
   async create(company: ICompany): Promise<ICompany> {
@@ -32,24 +51,8 @@ export class PrismaCompanyRepository implements ICompanyRepository {
 
   async createWithDefaultStock(company: ICompany, defaultStockName: string): Promise<{ company: ICompany; stock: IStock }> {
     try {
-      return await prisma.$transaction(async (transaction) => {
-        const createdCompany = await transaction.company.create({
-          data: {
-            name: company.name,
-            cnpj: company.cnpj,
-            ownerId: company.ownerId,
-          },
-        });
-
-        const createdStock = await transaction.stock.create({
-          data: {
-            name: defaultStockName,
-            companyId: createdCompany.id,
-          },
-        });
-
-        return { company: CompanyMapper.toDomain(createdCompany), stock: StockMapper.toDomain(createdStock) };
-      });
+      return await prisma.$transaction((transaction) =>
+        createCompanyWithDefaultStockIn(transaction, company, defaultStockName));
     } catch (error) {
       if (isPrismaErrorCode(error, 'P2002')) {
         throw new AppError('Já existe uma empresa cadastrada com este CNPJ.', 409);

@@ -51,7 +51,21 @@ import {
   suggestionDecisionParamsSchema,
   emptyCommandBodySchema,
   changePasswordBodySchema,
+  demoDocumentParamsSchema,
+  demoSessionParamsSchema,
 } from './schemas/http.schemas.js';
+import { PrismaDemoSessionRepository } from './repositories/prisma-demo-session.repository.js';
+import { PrepareDemoSessionUseCase } from './use-cases/demo/prepare-demo-session.use-case.js';
+import { GetCurrentDemoSessionUseCase } from './use-cases/demo/get-current-demo-session.use-case.js';
+import { GetDemoDocumentUseCase } from './use-cases/demo/get-demo-document.use-case.js';
+import { RestartDemoSessionUseCase } from './use-cases/demo/restart-demo-session.use-case.js';
+import {
+  GetCurrentDemoSessionController,
+  GetDemoDocumentController,
+  PrepareDemoSessionController,
+  RestartDemoSessionController,
+} from './controllers/demo-session.controllers.js';
+import { createDemoCommandRateLimiter } from './middlewares/demo-command-rate-limiter.js';
 import { PrismaProductSuggestionRepository } from './repositories/prisma-product-suggestion.repository.js';
 import { ConfirmProductSuggestionUseCase } from './use-cases/product-suggestions/confirm-product-suggestion.use-case.js';
 import { RejectProductSuggestionUseCase } from './use-cases/product-suggestions/reject-product-suggestion.use-case.js';
@@ -79,6 +93,16 @@ export interface CreateRoutesOptions {
   changePasswordRateLimiter: RequestHandler;
   createCompanyRateLimiter: RequestHandler;
   invoiceUpload: RequestHandler;
+  /** Ambiente de demonstração (DP-02). Ausente = rotas /demo não existem. */
+  demo?: {
+    commandRateLimiter: RequestHandler;
+    controllers: {
+      prepare: HttpController;
+      current: HttpController;
+      document: HttpController;
+      restart: HttpController;
+    };
+  };
   controllers: {
     registerUser: HttpController;
     login: HttpController;
@@ -107,6 +131,13 @@ export function createRoutes(options: CreateRoutesOptions) {
   router.get('/stocks/:stockId/suggestions', options.authenticate, validateParams(stockSuggestionParamsSchema), controllers.listSuggestions.handle.bind(controllers.listSuggestions));
   router.post('/suggestions/:suggestionId/confirm', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.confirmSuggestion.handle.bind(controllers.confirmSuggestion));
   router.post('/suggestions/:suggestionId/reject', options.authenticate, validateParams(suggestionDecisionParamsSchema), validateBody(emptyCommandBodySchema), controllers.rejectSuggestion.handle.bind(controllers.rejectSuggestion));
+  if (options.demo) {
+    const { commandRateLimiter, controllers: demo } = options.demo;
+    router.post('/demo/sessions', options.authenticate, commandRateLimiter, validateBody(emptyCommandBodySchema), demo.prepare.handle.bind(demo.prepare));
+    router.get('/demo/sessions/current', options.authenticate, demo.current.handle.bind(demo.current));
+    router.get('/demo/sessions/:sessionId/documents/:kind', options.authenticate, validateParams(demoDocumentParamsSchema), demo.document.handle.bind(demo.document));
+    router.post('/demo/sessions/:sessionId/restart', options.authenticate, commandRateLimiter, validateParams(demoSessionParamsSchema), validateBody(emptyCommandBodySchema), demo.restart.handle.bind(demo.restart));
+  }
   router.patch('/me/password', options.authenticate, options.changePasswordRateLimiter, validateBody(changePasswordBodySchema), controllers.changePassword.handle.bind(controllers.changePassword));
   return router;
 }
@@ -173,8 +204,27 @@ const listSuggestionsController = new ListPendingProductSuggestionsController(
   new ListPendingProductSuggestionsUseCase(productSuggestionRepository, stockRepository),
 );
 
+// INJEÇÃO - DEMONSTRAÇÃO (somente com DEMO_ENABLED=true; caso contrário as rotas não existem)
+function createDemoRoutesOptions(): CreateRoutesOptions['demo'] {
+  if (!env.DEMO_ENABLED) return undefined;
+
+  const demoSessionRepository = new PrismaDemoSessionRepository();
+  return {
+    commandRateLimiter: createDemoCommandRateLimiter(env.DEMO_COMMANDS_PER_MINUTE),
+    controllers: {
+      prepare: new PrepareDemoSessionController(new PrepareDemoSessionUseCase(demoSessionRepository)),
+      current: new GetCurrentDemoSessionController(new GetCurrentDemoSessionUseCase(demoSessionRepository)),
+      document: new GetDemoDocumentController(new GetDemoDocumentUseCase(demoSessionRepository)),
+      restart: new RestartDemoSessionController(new RestartDemoSessionUseCase(demoSessionRepository)),
+    },
+  };
+}
+
+const demoRoutesOptions = createDemoRoutesOptions();
+
 export const routes = createRoutes({
   authenticate: ensureAuthenticated,
+  ...(demoRoutesOptions && { demo: demoRoutesOptions }),
   uploadRateLimiter,
   loginRateLimiter,
   userRegistrationRateLimiter,

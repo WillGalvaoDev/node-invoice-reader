@@ -40,6 +40,11 @@ export const uploadInvoiceBodySchema = z.strictObject({
 export const stockSuggestionParamsSchema = z.strictObject({ stockId: idSchema });
 export const suggestionDecisionParamsSchema = z.strictObject({ suggestionId: idSchema });
 export const emptyCommandBodySchema = z.strictObject({});
+export const demoSessionParamsSchema = z.strictObject({ sessionId: idSchema });
+export const demoDocumentParamsSchema = z.strictObject({
+    sessionId: idSchema,
+    kind: z.enum(['initial', 'followup']),
+});
 export const changePasswordBodySchema = z.strictObject({
     currentPassword: passwordSchema,
     newPassword: passwordSchema,
