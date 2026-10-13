@@ -101,7 +101,7 @@ Estados permitidos: não iniciada → em andamento → bloqueada (causa concreta
 | DP-01 | Concluída | Commitada e publicada; CI verde |
 | DP-02 | Concluída | Commitada e publicada; CI verde (rotas `/demo` ainda desabilitadas no serviço) |
 | DP-03 | Concluída | Commitada e publicada; E2E local e CI (`web`, `web-e2e`) verdes |
-| DP-04 | Parcial: publicada e funcional; D03 reprovado | `/version` API = web = HEAD, `DEMO_ENABLED` ativa, fluxo hospedado validado manualmente. Rate limit usa o salto do proxy como chave (`TRUST_PROXY_HOPS` provavelmente 2); smoke autenticado, cold start e rollback público pendentes |
+| DP-04 | Parcial: publicada e funcional; D03 reprovado | `/version` API = web = HEAD, `DEMO_ENABLED` ativa, fluxo hospedado validado manualmente. D03: defeito confirmado (chave de rate limit é o salto do proxy, não o visitante), reproduzido em testes; correção em avaliação, nenhuma aplicada. Smoke autenticado, cold start e rollback público pendentes |
 | DP-05 | Bloqueada | Depende de DP-04 e de execução com Gemini real hospedado |
 
 Definition of Done do piloto (§6): **nenhum item pode ser marcado**. Itens com cobertura local automatizada (isolamento entre contas, confirmação/rejeição sem dupla movimentação, 429/duplicata/conflito) ainda exigem o aceite hospedado. Nada foi commitado, publicado nem alterado em serviço hospedado nesta etapa.
