@@ -1,242 +1,285 @@
-# DocScan — Leitura Inteligente de DANFE
+# DocScan
 
-**Próximas entregas:** [roadmap do primeiro piloto de demonstração](docs/demo-pilot-roadmap.md), com milestones, objetivos, testes e guias de implementação. O plano distingue a base já implementada das entregas ainda pendentes.
+**Entrada de mercadorias a partir da nota fiscal, com IA que lê e uma pessoa que decide.**
 
-> **Escopo atual (2026-10-10): demonstração de portfólio com IA real.** Tetos diários internos desligados por padrão; medição de consumo preservada. Veja a [especificação](docs/portfolio-demo-spec.md) e o [guia com PDFs e evidência real](docs/portfolio-demo-guide.md). O roadmap de piloto comercial permanece como histórico e evolução futura.
+O DocScan lê o DANFE (a versão impressa da nota fiscal eletrônica) em PDF ou imagem, confere os dados e lança os produtos no estoque. Quando um item parece ser um produto que já existe com outro código ou outro nome, o sistema mostra a sugestão e espera a confirmação de uma pessoa. A IA nunca altera o estoque sozinha.
 
-Backend em **Node.js** + **TypeScript** que processa DANFEs (Documento Auxiliar da Nota Fiscal Eletrônica) brasileiras: extrai dados via IA, valida contra as regras do domínio fiscal, casa itens com o catálogo existente e atualiza o estoque com auditoria best-effort (uma falha de auditoria não reverte a operação).
+**[Abrir a demonstração online](https://docscan-api-n5bj.onrender.com/app/)** · [Visão técnica](docs/portfolio-technical-overview.md) · [Roteiro da demonstração](docs/portfolio-demo-guide.md)
 
-Este documento descreve a arquitetura **real** do sistema, tal como implementada. Para o histórico de decisões e o plano de engenharia que levou a este estado, veja `docs/auditoria-tecnica.md` e `docs/backlog-engenharia.md`.
+![Revisão de uma sugestão: o item CAN-B recebido na nota é comparado lado a lado com o produto CAN-A já cadastrado, com os botões confirmar e rejeitar](docs/evidence/screenshots/dp-03-revisao-pendente.png)
+
+<sub>Tela de revisão com dados sintéticos (execução local). A nota já foi aplicada ao estoque, exceto o item que aguarda decisão.</sub>
 
 ---
 
-## Fluxo principal
+## O problema
 
+Quem recebe mercadoria confere a nota e digita cada item no sistema de estoque. É um trabalho repetitivo e sujeito a erro:
+
+- **Digitação:** quantidade, preço ou código lançados errados.
+- **Nomes diferentes para o mesmo produto:** o fornecedor chama de "Caneta esferográfica azul cód. 123" o que no estoque está como "Caneta azul". Sem cuidado, nasce um cadastro duplicado, ou dois produtos diferentes são somados como se fossem um.
+- **Retrabalho:** a mesma nota lançada duas vezes, ou corrigir depois o que entrou errado.
+
+## Como o DocScan resolve
+
+1. **Lê a nota.** Você envia o PDF ou a foto do DANFE; a IA extrai fornecedor, itens, quantidades e valores.
+2. **Confere antes de gravar.** Regras fixas validam o CNPJ, a chave de acesso e se a soma dos itens bate com o total da nota. Nota inconsistente é recusada, sem alterar nada.
+3. **Reconhece o que já existe.** Mesmo código, do mesmo fornecedor e na mesma unidade, soma direto no produto. Quando o código não bate, a IA procura um produto parecido entre poucos candidatos e apenas **sugere**.
+4. **Você decide.** A sugestão aparece lado a lado com o produto do estoque. Confirmar soma ao produto existente; rejeitar cria um produto novo. Até a decisão, o item não entra no estoque.
+5. **Fica registrado.** Cada entrada e cada decisão ficam auditadas, e a mesma nota não é lançada duas vezes.
+
+---
+
+## Demonstração online
+
+**Endereço:** <https://docscan-api-n5bj.onrender.com/app/>
+
+O acesso é feito por **convite**: o cadastro pede um código de convite, que não é publicado neste repositório. Para receber o código, entre em contato com o autor pelo [perfil no GitHub](https://github.com/WillGalvaoDev).
+
+Com o código em mãos:
+
+1. Abra o endereço acima e clique em **Criar conta** (nome, e-mail, senha e código de convite).
+2. Clique em **Preparar ambiente**: o sistema cria uma empresa e um estoque de exemplo, só seus.
+3. Baixe a **nota inicial** e a **nota complementar** (documentos sintéticos, sem valor fiscal).
+4. Envie a nota inicial e depois a complementar.
+5. Revise a sugestão: **confirmar** soma ao produto existente; **rejeitar** cadastra um produto novo. Confira o estoque.
+6. Para recomeçar, use **Reiniciar ambiente**.
+
+Bom saber antes de usar:
+
+- Use apenas as notas de exemplo. **Não envie notas fiscais reais.**
+- O serviço roda em plano gratuito: o primeiro acesso depois de um período parado pode levar algumas dezenas de segundos.
+- A leitura usa o Google Gemini real. Se o provedor recusar ou demorar, a tela informa o erro e nada é gravado; basta tentar de novo mais tarde.
+- O login tem limite de tentativas por endereço. Se aparecer aviso de limite, aguarde alguns minutos.
+
+---
+
+## Fluxo de funcionamento
+
+```mermaid
+flowchart LR
+    A[Envio do DANFE<br/>PDF, PNG ou JPEG] --> B[Extração<br/>Gemini]
+    B --> C[Validação<br/>schema, CNPJ, chave, totais]
+    C --> D{Código já existe<br/>no estoque?}
+    D -- sim --> K{Mesmo fornecedor<br/>e unidade?}
+    K -- sim --> G[Gravação em<br/>transação única]
+    K -- não --> R[Nota recusada<br/>sem gravar]
+    D -- não --> E[Pré-filtro de candidatos<br/>sem IA]
+    E --> F[Similaridade<br/>Gemini]
+    F -- sugere --> H[Sugestão pendente]
+    F -- sem equivalente --> G
+    H --> I{Revisão humana}
+    I -- confirmar ou rejeitar --> G
+    G --> J[Estoque, auditoria<br/>e telemetria]
 ```
-Imagem/PDF → OCR (Gemini) → Extração estruturada → Validação → Matching de produtos → Upsert → Auditoria
-```
 
-A IA (Google Gemini) **nunca é fonte de verdade**. Ela apenas extrai dados do documento e sugere similaridade entre um item da nota e produtos já cadastrados. Toda decisão que altera a identidade de um produto passa por confirmação humana antes de afetar o estoque — ver [Sugestões de produto](#sugestões-de-produto-human-in-the-loop) abaixo.
+Se qualquer etapa falhar (nota incoerente, IA indisponível, resposta fora do formato), a nota inteira é recusada e nada é gravado.
+
+## Funcionalidades implementadas
+
+- Leitura de DANFE em **PDF, PNG ou JPEG** (até 10 MiB), com conferência do tipo real do arquivo.
+- Validação da extração: formato da resposta, CNPJ com dígitos verificadores, chave de 44 dígitos, soma dos itens contra o total e limite de itens por nota.
+- Entrada automática no estoque quando código, fornecedor e unidade coincidem, com **custo médio ponderado**.
+- Sugestões de produto equivalente por IA, com **confirmação ou rejeição humana**.
+- Recusa explícita de conflitos (mesmo código de outro fornecedor ou em outra unidade), em vez de somar o que não é comparável.
+- Bloqueio de nota repetida (mesma chave de acesso).
+- Contas com login, troca de senha, empresas e estoques isolados por usuário.
+- Interface web em `/app` e API HTTP documentada.
+- Ambiente de demonstração por visitante, com notas sintéticas para baixar e reinício.
+- Auditoria de entradas e decisões; telemetria de cada chamada à IA (tempo, tokens e falhas), sem conteúdo do documento.
+
+## Aplicações práticas
+
+Exemplos de uso do fluxo **já implementado** (leitura, conferência, sugestão e lançamento):
+
+- **Papelaria ou loja de bairro:** lançar a nota do distribuidor sem digitar item por item, revisando apenas os produtos que chegaram com código ou nome diferente.
+- **Pequeno comércio com vários fornecedores:** evitar que o mesmo código de dois fornecedores, ou unidades diferentes (`UN` e `CX`), sejam somados por engano.
+- **Conferência de recebimento:** detectar notas cuja soma dos itens não bate com o total antes de qualquer lançamento.
+
+Integração com ERP, emissão fiscal, leitura direta do XML da NF-e e catálogo de fornecedores **não existem** hoje; seriam evoluções futuras.
+
+## Estado do projeto
+
+**Demonstração funcional de portfólio, não um produto comercial pronto para operação.**
+
+- Publicado no Render com banco PostgreSQL no Neon, em planos gratuitos, sem SLA.
+- O fluxo completo (cadastro, leitura com Gemini real, sugestão, confirmação, rejeição e persistência) foi validado manualmente no ambiente publicado.
+- Os dados da demonstração são sintéticos. Não há backup com garantia de recuperação, recuperação de senha por e-mail nem suporte a notas reais.
+- Histórico de decisões e evidências: [roadmap da demonstração](docs/demo-pilot-roadmap.md), [DP-04](docs/evidence/DP-04.md) e [DP-05](docs/evidence/DP-05.md).
 
 ---
 
-## Arquitetura
+# Para quem é técnico
 
-Estrutura real de `src/`:
+## Arquitetura e stack
 
-* **`controllers/`** — Tradução HTTP ↔ use case. Sem lógica de negócio; lançam `AppError` e deixam o handler global responder.
-* **`use-cases/`** — Orquestração das regras de aplicação (`ReadInvoiceUseCase`, `CreateCompanyUseCase`, `LoginUseCase`, casos de uso de sugestão de produto, etc.).
-* **`domain/`** — Regras de domínio puras e determinísticas (validação de CNPJ, coerência do DANFE). Sem I/O.
-* **`providers/`** — Contratos e implementações para integrações externas: `IStorageProvider` (disco), `IAiProvider` (Gemini), `IHashProvider` (Argon2), `ITokenProvider` (JWT/jose).
-* **`repositories/`** — Gateways de dados: interface + implementação Prisma + dublê in-memory (para testes) de cada agregado (User, Company, Stock, Product, AuditLog, ProductSuggestion, invoice persistence).
-* **`mappers/`** — Tradução explícita entre o tipo gerado pelo Prisma e o tipo de domínio (`ProductMapper`, `CompanyMapper`, `StockMapper`, `AuditLogMapper`). Nenhum repositório Prisma faz cast (`as`) direto do retorno do client para o tipo de domínio.
-* **`middlewares/`** — Autenticação, rate limiting, validação declarativa (`zod`), request ID, cabeçalhos de segurança, error handler global.
-* **`schemas/`** — Schemas `zod` para corpo de requisição HTTP e para a resposta estruturada do Gemini.
-* **`infra/`** — Cliente Prisma único, logger estruturado, telemetria de IA, healthcheck.
-* **`errors/`** — `AppError` (estende `Error`) e tradução de códigos de constraint do Prisma (`P2002`/`P2003`) para status HTTP.
-* **`config/`** — Configuração centralizada e validada (`env.ts`), upload (`multer`), `trust proxy`.
-
-Não existe camada de `entities/` nem container de DI — ver [Decisões arquiteturais deliberadas](#decisões-arquiteturais-deliberadas).
-
----
-
-## API
-
-Todas as respostas seguem o envelope `{ status: 'success', data }` ou `{ status: 'error', message }`. Erros de negócio usam `AppError` e são traduzidos pelo error handler global para o status HTTP correspondente — nenhuma rota faz comparação de string de mensagem para decidir status.
-
-| Método | Rota | Autenticação | Descrição |
-|---|---|---|---|
-| `GET`  | `/health` | pública | `SELECT 1` real no Postgres; sucesso em cache por 5 s; limite de 60/IP/min; `503` se o banco estiver indisponível ou o processo em shutdown. |
-| `POST` | `/users` | pública, rate limit 5/hora por IP | Cadastro de usuário. Exige `inviteCode` correto (coorte controlada do piloto); ausente ou incorreto devolve o mesmo `403` genérico. Senha com Argon2. |
-| `POST` | `/login` | pública, rate limit 10/15min por IP | Autenticação; devolve JWT. |
-| `POST` | `/companies` | Bearer JWT, rate limit 5/min por usuário | Cria empresa + estoque principal em uma transação atômica. |
-| `GET`  | `/companies` | Bearer JWT | Lista paginada (cursor) das empresas acessíveis ao usuário — owned e onde ele é colaborador —, com o papel (`OWNER`/`COLLABORATOR`) de cada uma. |
-| `GET`  | `/companies/:companyId/stocks` | Bearer JWT | Lista paginada (cursor) dos estoques visíveis da empresa. Owner vê todos; colaborador só os que têm `StockPermission.canView = true`. `404` (sem distinguir "não existe" de "sem acesso") se o usuário não tiver nenhuma relação com a empresa. |
-| `GET`  | `/products` | Bearer JWT | Lista paginada (cursor) por `stockId`. Exige acesso ao estoque. |
-| `POST` | `/invoices/upload` | Bearer JWT, rate limit 5/min por usuário | Upload de DANFE (JPEG/PNG/PDF, até 10 MiB, até `DANFE_MAX_ITEMS` linhas de produto). Dispara o pipeline completo. `422` se exceder o teto de itens, `503` se o matching ficar indisponível — nada é gravado e a nota pode ser reenviada. |
-| `GET`  | `/stocks/:stockId/suggestions` | Bearer JWT | Lista sugestões de produto pendentes do estoque. |
-| `POST` | `/suggestions/:suggestionId/confirm` | Bearer JWT | Confirma uma sugestão: aplica a entrada no produto sugerido. |
-| `POST` | `/suggestions/:suggestionId/reject` | Bearer JWT | Rejeita uma sugestão: cadastra o item como produto novo. |
-| `POST` | `/demo/sessions` | Bearer JWT, `DEMO_ENABLED=true`, rate limit `DEMO_COMMANDS_PER_MINUTE`/min por usuário | Prepara (201) ou reutiliza (200) a sessão de demonstração ativa: empresa sintética, estoque vazio e duas chaves de nota exclusivas. Não chama IA nem cria produtos. |
-| `GET`  | `/demo/sessions/current` | Bearer JWT, `DEMO_ENABLED=true` | Sessão ativa do usuário ou `404`. |
-| `GET`  | `/demo/sessions/:sessionId/documents/:kind` | Bearer JWT, `DEMO_ENABLED=true` | PDF sintético (`initial` ou `followup`) com a chave exclusiva da sessão; `Cache-Control: no-store`. `404` igual para sessão alheia e inexistente; `409` se arquivada. |
-| `POST` | `/demo/sessions/:sessionId/restart` | Bearer JWT, `DEMO_ENABLED=true`, mesmo rate limit | Arquiva a sessão e cria sucessora vazia; repetir o mesmo ID devolve a mesma sucessora. |
-| `PATCH` | `/me/password` | Bearer JWT, rate limit 5/min por usuário | Troca a própria senha (`currentPassword`/`newPassword`). `204` sem corpo. Incrementa `authVersion` na mesma escrita do novo hash — todo token emitido antes da troca deixa de ser aceito, imediatamente e sem depender de comparação de timestamp. |
-
-### Estado da demonstração (2026-10-10)
-
-| | Itens |
-|---|---|
-| **Implementado e testado localmente** | extração + validação + matching seguro por fornecedor/unidade; sugestões com decisão humana; sessões de demonstração por visitante (`/demo/*`); interface web em `/app`; `GET /version`; smoke sem IA (`scripts/smoke-demo.mjs`); ensaio isolado de reconstrução e rollback (`scripts/rehearse-release.mjs`); runbook ([operacional](docs/demo-operations-runbook.md)) |
-| **Demonstrado com Gemini real** | apenas o fluxo local registrado em [`docs/portfolio-demo-guide.md`](docs/portfolio-demo-guide.md) (2026-10-10, versão anterior às mudanças desta etapa) |
-| **Pendente** | publicação desta release, smoke e medições no serviço hospedado, fluxo real hospedado (ver [DP-04](docs/evidence/DP-04.md) e [DP-05](docs/evidence/DP-05.md)) |
-| **Futuro** | backup/restore com RPO/RTO, recuperação de senha por e-mail, orçamento por usuário, múltiplos fornecedores com conversão de unidades, documentos reais |
-
-Visão técnica para apresentação: [`docs/portfolio-technical-overview.md`](docs/portfolio-technical-overview.md). Plano: [`docs/demo-pilot-roadmap.md`](docs/demo-pilot-roadmap.md).
-
-### Interface web (DP-03)
-
-Uma interface mínima (`web/`, React + Vite + TypeScript) é servida pelo próprio backend em **`/app`**, na mesma origem da API — sem CORS e sem segredo no bundle. `GET /` redireciona para `/app/`; deep links e refresh sob `/app/*` recebem o `index.html`; arquivo inexistente ou rota de API desconhecida responde `404` JSON `{status:'error'}`, nunca HTML. As respostas de `/app` carregam CSP restritiva (`script-src 'self'`, sem `unsafe-eval`).
-
-* **Jornada:** entrar/criar conta (convite do operador) → preparar ambiente de exemplo → baixar notas → enviar → revisar sugestões lado a lado → confirmar/rejeitar → consultar estoque; troca de senha, saída e reinício do ambiente (com confirmação).
-* **Token só em memória:** recarregar exige novo login; a sessão de demonstração é reencontrada por `GET /demo/sessions/current`. O JWT nunca vai em URL.
-* **Sem retry automático** de upload, decisão ou IA; falhas são traduzidas por tipo (401, 403/404, 409, 422, 429, 503/504, rede) e, em estado desconhecido, a tela relê o estoque antes de qualquer reenvio.
-* **Conteúdo extraído é texto:** nenhuma renderização de HTML bruto.
-* O build (`web/dist`) é gerado no deploy (`render:build`) e **nunca versionado**. Comandos: `npm --prefix web ci`, `npm run web:build`, `npm run web:test`, `npm run web:test:e2e` (E2E: API real compilada + PostgreSQL efêmero + Gemini determinístico em processo separado, `web/e2e/`, exige Docker e Chrome).
-* Os rate limits de `/users` (5/h/IP) e `/login` (10/15 min/IP) valem para o E2E; a suíte usa poucas contas por execução.
-
-### Autenticação e tenancy
-
-Bearer JWT (`Authorization: Bearer <token>`), verificado via `jose`. `req.user` só existe **depois** do middleware de autenticação — é `undefined` em `/login`, `/users` e em qualquer ponto anterior a ele (refletido no tipo: `Express.Request.user?: { id: string }`).
-
-Autorização é sempre derivada do recurso, nunca do corpo/query da requisição: `companyId` de um upload de invoice vem do `stockId` autorizado, não de um campo enviado pelo cliente. Owner da empresa tem acesso implícito a todos os estoques; colaboradores precisam de `StockPermission` explícita (`canView`/`canCreate`) por estoque.
-
-### Upload e pipeline de IA
-
-1. `multer` valida tamanho (10 MiB) e MIME (`image/jpeg`, `image/png`, `application/pdf`) antes do controller; em seguida os primeiros bytes do arquivo são conferidos contra o tipo declarado (assinatura JPEG/PNG/`%PDF-`) e divergência responde `415` com remoção do temporário. É verificação de assinatura, não prova de que o arquivo é legível ou legítimo.
-2. Autorização de acesso ao estoque acontece **antes** de qualquer I/O — inclusive antes da leitura do arquivo do disco.
-3. `IStorageProvider.readFile` lê os bytes (`Buffer`); `IAiProvider.extractDanfeData` recebe conteúdo + mimetype, nunca um caminho de arquivo.
-4. Gemini extrai os dados com timeout de 30s, no máximo 2 tentativas (retry para timeout/`5xx`/erro de rede; nunca para `429`), e a resposta é validada por schema `zod` — nada do modelo é confiado sem validação de tipo/estrutura.
-5. Coerência do DANFE é verificada (soma dos itens vs. total declarado, tolerância `max(R$0,02, 1%)`) antes de qualquer persistência.
-6. Matching: item com código exato atualiza o produto automaticamente **somente se a origem (CNPJ do fornecedor) e a unidade forem as mesmas**; código existente com outro fornecedor, outra unidade (`UN` × `CX` não são convertidas) ou origem legada desconhecida aborta a nota com `422`, sem escrita, em vez de somar quantidades incompatíveis. A regra é revalidada dentro da transação (`ON CONFLICT ... WHERE`), inclusive sob concorrência. Sem código exato, um pré-filtro determinístico (léxico, sem IA) reduz o catálogo a no máximo 15 candidatos; só então o Gemini é chamado para similaridade — nunca com o estoque inteiro.
-7. O resultado da similaridade tem **três estados distinguíveis pelo tipo** — `match`, `no_match` e `unavailable` — e nunca `null`. Ver [Indisponibilidade do matching](#indisponibilidade-do-matching) abaixo.
-8. Toda a persistência de uma nota (upsert de produtos com custo médio ponderado, criação de sugestões, `ProcessedInvoice`) acontece em **uma única transação Postgres**. Reenvio da mesma chave de acesso é idempotente (`409` em duplicata).
-
-### Indisponibilidade do matching
-
-`IAiProvider.findSimilarProduct` devolve uma união discriminada, nunca `null`:
-
-| Estado | Significado | Efeito |
+| Camada | Tecnologia | Responsabilidade |
 |---|---|---|
-| `match` | o modelo respondeu e indicou um candidato **da lista fornecida**, com confiança ≥ limiar | vira `ProductSimilaritySuggestion` pendente |
-| `no_match` | o modelo respondeu validamente que não há equivalente, ou a confiança ficou abaixo do limiar, ou não havia candidato | item é cadastrado como produto novo |
-| `unavailable` | **não há evidência confiável para concluir nada** | a nota inteira é abortada, sem persistir |
+| API | Node.js 24, TypeScript, Express 5 | rotas, autenticação, validação de entrada, limites de requisição |
+| Interface | React 19, Vite, TypeScript | jornada da demonstração, servida pela própria API em `/app` (mesma origem, sem CORS) |
+| IA | Google Gemini (`gemini-2.5-flash`, SDK `@google/genai`) | extração do documento e sugestão de similaridade |
+| Validação | Zod | corpo das requisições e resposta estruturada do modelo |
+| Dados | PostgreSQL, Prisma 7 (`@prisma/adapter-pg`) | persistência, migrations versionadas |
+| Segurança | JWT (`jose`), Argon2, Helmet, `express-rate-limit` | sessão, senhas, cabeçalhos (CSP, HSTS), limites por IP e por usuário |
+| Testes | Vitest, Testing Library, Playwright | unitários, integração com PostgreSQL real, E2E de navegador |
+| Operação | GitHub Actions, Render, Neon | CI, deploy com migration no build, banco gerenciado |
 
-`unavailable` cobre timeout, falha 5xx do provedor, JSON inválido, resposta fora do schema e **ID de candidato fora da lista enviada** (alucinação — a defesa contra prompt injection continua recusando o ID; o que mudou é a conclusão).
+Organização do código em `src/`:
 
-**Falha técnica da IA não é evidência de que o item seja novo.** Quando ocorre `unavailable`, a nota é abortada **antes da transação de persistência** e a requisição responde `503`. Nada é gravado — nem produto, nem sugestão, nem `ProcessedInvoice` —, então a chave de idempotência **não é consumida** e a mesma DANFE pode ser reenviada quando o provedor voltar. O `503` é deliberadamente distinto do `400`/`422` de documento inválido: ali o problema é o documento, aqui o documento pode estar perfeito.
+- **`controllers/`**: tradução HTTP ↔ caso de uso, sem regra de negócio.
+- **`use-cases/`**: orquestração (`ReadInvoiceUseCase`, decisões de sugestão, login, empresas).
+- **`domain/`**: regras puras e determinísticas (CNPJ, coerência do DANFE), sem I/O.
+- **`providers/`**: contratos para integrações externas (IA, armazenamento, hash, token).
+- **`repositories/`** e **`mappers/`**: acesso a dados com Prisma e dublês em memória para testes; conversão explícita para tipos de domínio.
+- **`middlewares/`**, **`schemas/`**, **`infra/`**, **`config/`**: autenticação, rate limit, Zod, logger, telemetria, configuração validada no boot.
 
-### Sugestões de produto (human-in-the-loop)
+Decisões deliberadas: sem container de injeção de dependência (composição manual em `src/routes.ts`); sem camada de entidades; artefatos compilados versionados junto do `.ts`, com guarda no CI (`verify:artifacts`). O contexto de cada decisão está em [`docs/auditoria-tecnica.md`](docs/auditoria-tecnica.md) e [`docs/backlog-engenharia.md`](docs/backlog-engenharia.md).
 
-Quando a IA identifica um candidato por similaridade (confiança configurável via `SIMILARITY_CONFIDENCE_THRESHOLD`, default `0.7`), o item **não altera o estoque**. Uma `ProductSimilaritySuggestion` fica `PENDING` até decisão humana via `/suggestions/:id/confirm` ou `/suggestions/:id/reject`:
+## Engenharia de IA
 
-* **Confirmar** aplica a entrada (custo médio ponderado) no produto sugerido.
-* **Rejeitar** preserva o candidato e cadastra o item recebido como produto novo. Se o código recebido já estiver ocupado no estoque, responde `409` e a sugestão continua pendente.
-* **Confirmar** com unidade incompatível responde `422` e a sugestão continua pendente. A origem do produto confirmado é preservada; a recebida fica na sugestão para rastreabilidade.
+O modelo é tratado como **componente não confiável**: ele extrai e sugere; regras determinísticas e pessoas decidem.
 
-A transição `PENDING → CONFIRMED|REJECTED` é condicional (`WHERE status = PENDING`) para impedir decisão dupla sob concorrência.
+| Etapa | Papel da IA | Controle determinístico |
+|---|---|---|
+| Extração | lê o documento e devolve JSON | schema Zod, tipos, limite de itens, CNPJ, chave de acesso, soma dos itens × total |
+| Matching por código | nenhum | mesmo código só acumula com o mesmo fornecedor e a mesma unidade; conflito recusa a nota (`422`) |
+| Similaridade | aponta um candidato **da lista oferecida** | pré-filtro léxico limita a 15 candidatos; ID fora da lista é recusado; limiar de confiança configurável |
+| Alteração de identidade | nenhum | sugestão fica `PENDING` até confirmação ou rejeição humana |
 
-### PostgreSQL e Prisma
+- **Três resultados distintos de similaridade:** `match`, `no_match` e `unavailable`, modelados como união discriminada. Falha técnica do modelo (timeout, erro do provedor, JSON inválido, candidato inventado) é `unavailable`: a nota inteira é abortada com `503`, sem gravar nada, e pode ser reenviada. Indisponibilidade nunca vira "produto novo".
+- **Conteúdo do documento é dado, não instrução:** texto dentro do PDF não altera o prompt de sistema.
+- **Chamadas controladas:** timeout de 30 s, no máximo 2 tentativas para erros transitórios, nunca repetição em `429`.
+- **Custo observado:** cada tentativa é reservada e reconciliada em um ledger, com tokens reais e custo estimado. Tetos diários existem, mas ficam desligados por padrão na demonstração; há um interruptor que desliga toda chamada de IA.
 
-Um único `PrismaClient`/`Pool` (`src/infra/prisma.ts`, `max: 10`) compartilhado por todos os repositórios — não há uma pool por repositório. Migrations em `prisma/migrations/`, aplicadas com `prisma migrate deploy`; nenhuma migration histórica é editada. Índices compostos cobrem as consultas reais paginadas/de auditoria (`products(stockId, createdAt, id)`, `audit_logs(companyId, createdAt)`, `audit_logs(userId, createdAt)`, `ai_call_events(createdAt)`/`(correlationId)`/`(operation, createdAt)`).
+## Confiabilidade e segurança
 
-### Observabilidade
+- **Autenticação:** JWT com versão de sessão; trocar a senha invalida imediatamente os tokens anteriores. Senhas com Argon2. Cadastro por convite.
+- **Isolamento:** autorização derivada do recurso, nunca do corpo da requisição. Recurso de outra conta responde como inexistente (`404`). Cada visitante da demonstração tem empresa e estoque próprios.
+- **Transação única por nota:** produtos, sugestões e o registro da nota são gravados juntos ou não são gravados.
+- **Idempotência:** a chave de acesso é única; reenvio responde `409` sem alterar o estoque.
+- **Concorrência:** a regra fornecedor/unidade é revalidada dentro do `INSERT … ON CONFLICT … WHERE`; decisões de sugestão usam transição condicional, então uma decisão dupla é aplicada uma vez.
+- **Upload seguro:** tamanho, tipo declarado e assinatura do arquivo conferidos; autorização antes de ler o arquivo.
+- **Auditoria e observabilidade:** `AuditLog` de entradas, decisões e tentativas de acesso indevido; logs estruturados em JSON com redação de segredos e `X-Request-Id`; eventos de IA sem conteúdo do documento; `GET /version` expõe o SHA da release.
+- **Operação:** healthcheck com consulta real ao banco, encerramento gracioso (`SIGTERM`), configuração validada no boot (falha rápida).
 
-* **Logger estruturado** (`src/infra/logger.ts`) em JSON, com `redact` recursivo de senha/hash/token/Authorization/API key, e `requestId` de correlação em toda resposta (`X-Request-Id`).
-* **Auditoria de domínio** (`AuditLog`) registra criação/atualização de produto — inclusive quando a origem é confirmar/rejeitar uma sugestão de similaridade (P3-00A: mesma forma `PRODUCT`/`CREATE`|`UPDATE` com `{quantity, unitPrice, totalPrice}`, descrição própria, nunca "processado por invoice") —, criação de empresa, tentativa de acesso não autorizado e troca de senha, com `previousState`/`newState`. Best-effort: falha ao gravar auditoria nunca reverte uma operação já persistida.
-* **Telemetria de IA** (`src/infra/ai-telemetry.ts`) registra, por chamada ao Gemini, duração monotônica, tentativas, tokens reais (nunca estimados), custo **estimado** em nanoUSD (`estimatedCostUsdNanos` — nunca faturado, ver `DANFE_MAX_ITEMS`/D4) e categoria de falha; e por sugestão, decisão e faixa de confiança.
-* **`ai_call_events`** (P3-01, `src/infra/prisma-ai-telemetry.ts`) persiste cada chamada real ao Gemini em PostgreSQL, correlacionada por um `correlationId` (UUID) **gerado no servidor** em `ReadInvoiceUseCase.execute` — nunca aceito do cliente, ao contrário de `requestId`/`X-Request-Id`, que é guardado só para cruzar com log. `ProcessedInvoice.correlationId` (nullable) liga a nota ao custo sem nunca aparecer em log. Contrato: **observabilidade, nunca autoridade de gasto** — escrita best-effort, fora da transação de domínio; nenhum caminho de código lê `ai_call_events` para decidir se uma chamada de IA pode acontecer (isso é `ai_usage_ledger`, P4-02). Nenhum conteúdo de documento, descrição de produto ou `accessKey` é persistido — só IDs, contadores, duração e custo estimado. `userId`/`companyId`/`stockId` existem na linha (mesmo perímetro de acesso do banco) mas são deliberadamente excluídos do canal de log estruturado (whitelist positiva, mesmo princípio de `AuditLog`/P3-00B).
-* **`ai_suggestion_events`** (P3-02) é uma **view** SQL, não uma tabela — `product_similarity_suggestions` já guarda confidence bruta, status, `decidedAt`/`decidedByUserId`; a view só junta `ProcessedInvoice.correlationId` e `Stock.companyId` e expande cada sugestão em um evento `created` (sempre) e, quando já decidida, um segundo evento `confirmed`/`rejected`. Sem escrita própria: não há o que falhar nem divergir do estado que já é transacional. `confidenceBucket` nunca é persistido — a faixa é calculada na consulta.
-* **Runbook de telemetria** (P3-03, `docs/telemetry-runbook.md`) documenta as 8 consultas de referência do piloto sobre `ai_call_events`/`ai_suggestion_events` (latência, tokens/custo por nota, taxa de falha, distribuição e aceitação de confidence, chamadas de similaridade por nota), cada uma testada contra dado semeado real. Retenção de `ai_call_events` em 60 dias (D2) via `npm run retention:ai-call-events` (`scripts/purge-ai-call-events.mjs`) — script de operador, idempotente, nunca toca `AuditLog` nem `ai_usage_ledger`; sem scheduler automático, o Render Free não oferece cron/one-off jobs.
-* **Contabilização e tetos opcionais de IA.** `GEMINI_QUOTA_ENFORCEMENT_ENABLED=false` é o default da demonstração: não há bloqueio diário global ou por usuário. Reservas e consumo continuam no `ai_usage_ledger`, em transação global + usuário; falha ao reservar continua recusando a chamada (503). Cada tentativa conserva seu instante de reserva para reconciliar corretamente mesmo atravessando meia-noite. `true` reativa a política histórica 18/dia global e 5/dia por usuário, configurável na faixa atual 1–20, com rollback atômico ao exceder qualquer teto. Esses números não descrevem a cota atual do provedor. `GEMINI_ENABLED` permanece um kill switch independente. `429` do Gemini vira 503 com mensagem de limite temporário e categoria `provider_rate_limit`, sem retry automático nem horário de retorno presumido. Tokens e custos estimados são observados, sem teto financeiro.
-* **Reconciliação ledger × eventos** (P3-04, `npm run reconcile:ai-usage [YYYY-MM-DD]`, sem argumento reconcilia ontem em UTC) compara `ai_usage_ledger` (autoritativo) contra `ai_call_events` (observação) — somente leitura, nunca corrige nada. A grandeza comparável para requisições é `SUM(ai_call_events.attempts)`, não `COUNT(*)`: eventos contam operações lógicas, o ledger debita por tentativa HTTP (cada retry conta). Uma tentativa recusada por cota no meio de um retry incrementa o contador de tentativas do evento antes de a reserva ser revertida — divergência de 1 unidade esperada, não anomalia. Reserva residual (`reservedRequests != 0` num período fechado) é sempre anomalia.
+## Testes e CI
 
-### Operação
+- **Unitários** (Vitest): regras de domínio, casos de uso, middlewares, provedor de IA com SDK substituído.
+- **Integração com PostgreSQL real** (Docker): transações, rollback, concorrência, constraints, idempotência e isolamento entre contas.
+- **E2E de navegador** (Playwright): jornada completa contra a API compilada, banco efêmero e um Gemini determinístico em processo separado.
+- **CI** (GitHub Actions): validação do Prisma, typecheck, lint, build, guarda de artefatos, testes unitários e de integração, build de produção só com dependências de runtime, o comando exato de build do Render e o E2E.
 
-* **Graceful shutdown**: `SIGTERM`/`SIGINT` drenam requisições em voo, encerram o pool do Postgres e saem com código 0; timeout configurável força o fechamento e sai com código 1.
-* **Healthcheck protegido**: respostas saudáveis reutilizam por 5 s o resultado do `SELECT 1` e requisições são limitadas a 60/IP/min. Falhas nunca entram no cache, permitindo detectar recuperação imediatamente; o estado de shutdown sempre responde `503` sem consultar o banco.
-* **`unhandledRejection`/`uncaughtException`** são logados com contexto seguro e disparam o mesmo shutdown fatal.
-* **CI** (`.github/workflows/ci.yml`, GitHub Actions, `ubuntu-latest`): `prisma validate` → `prisma generate` → `typecheck` → `lint` → `build` → **guard de artefatos** (`npm run verify:artifacts`, falha se o build sujar o checkout) → suíte unitária → gate de integração PostgreSQL real (Docker); job separado valida o build de produção com **apenas** `dependencies` instaladas (`npm prune --omit=dev`) e roda `scripts/verify-production-runtime.mjs`, que importa o grafo de dependências real do artefato compilado.
+## Executar localmente
 
----
-
-## Variáveis de ambiente
-
-Ver `.env.example`. Todas são validadas e falham rápido no boot (`src/config/env.ts`) — nenhuma tem fallback silencioso além dos defaults documentados.
-
-| Variável | Obrigatória | Default | Descrição |
-|---|---|---|---|
-| `DATABASE_URL` | sim | — | Postgres. |
-| `JWT_SECRET` | sim | — | Assinatura dos tokens (HS256). Mínimo de **32 caracteres** — o boot falha abaixo disso. Gerar com `openssl rand -base64 48`. |
-| `GEMINI_API_KEY` | sim | — | Google Gemini. |
-| `INVITE_CODE` | sim | — | Código de convite compartilhado exigido em `POST /users` (P4-03). Mínimo de **8 caracteres**. Nunca versionado; trocar exige só reiniciar o serviço, sem novo build. |
-| `PORT` | não | `3333` | Porta HTTP. |
-| `TRUST_PROXY_HOPS` | não | `0` | Número exato de proxies reversos confiáveis (0–10), usado com `TRUST_PROXY_MODE=hops`. Só alterar se a API estiver atrás de proxy conhecido. **Atrás de Cloudflare + balanceador (Render), `1` usa a borda do Cloudflare como identidade e `2` aceita valor forjado se a cadeia vier incompleta** — preferir `TRUST_PROXY_MODE`. |
-| `TRUST_PROXY_MODE` | não | `hops` | `hops` (contagem fixa, comportamento original) ou `render-cloudflare`: confia no socket por posição (roteamento do Render) e no último salto do `X-Forwarded-For` somente se for uma borda do Cloudflare (faixas em `src/config/cloudflare-ip-ranges.ts`). Exige `RENDER=true` (definido pelo Render) e `TRUST_PROXY_HOPS` ausente/`0`; qualquer outro valor falha no boot. Detalhes e premissas: `docs/demo-operations-runbook.md` §10. |
-| `CORS_ALLOWED_ORIGINS` | não | vazio | Allowlist HTTP(S) separada por vírgula. Sem wildcard, sem credenciais. |
-| `REQUEST_TIMEOUT_MS` | não | `120000` | Timeout de requisição do servidor HTTP. |
-| `SHUTDOWN_TIMEOUT_MS` | não | `30000` | Prazo do graceful shutdown antes de forçar. |
-| `GEMINI_TIMEOUT_MS` | não | `30000` | Timeout por tentativa ao Gemini. |
-| `GEMINI_MAX_ATTEMPTS` | não | `2` | Tentativas totais (1–2) para erro transitório. |
-| `SIMILARITY_CONFIDENCE_THRESHOLD` | não | `0.7` | Limiar de confiança do matching por similaridade (0–1). Fonte única usada no prompt e no código — não alterar sem dado real de uso. |
-| `DANFE_MAX_ITEMS` | não | `100` | Máximo de linhas aceitas (1–1000), validado após extração e antes de matching/persistência. Acima do limite: 422. Não envia `maxItems` ao Gemini, que recusava esse schema por complexidade; não limita antecipadamente tokens de geração. |
-| `GEMINI_QUOTA_ENFORCEMENT_ENABLED` | não | `false` | Aplica tetos diários global e por usuário quando `true`. Contabilização permanece ativa nos dois modos. |
-| `GEMINI_ENABLED` | não | `true` | Kill switch do guard de orçamento (P4-02). `false` recusa toda chamada de IA com `503` sem `Retry-After` (decisão do operador, não janela de cota) — resto do sistema intacto. |
-| `GEMINI_GLOBAL_REQUESTS_PER_DAY` | não | `18` | Teto global histórico, faixa 1–20. Aplicado somente com enforcement habilitado. |
-| `GEMINI_USER_REQUESTS_PER_DAY` | não | `5` | Teto individual histórico, faixa 1–20. Aplicado somente com enforcement habilitado. |
-| `RELEASE_SHA` | não | — | SHA da release exposto por `GET /version` quando a plataforma não informa `RENDER_GIT_COMMIT` (que o Render define sozinho). Só hexadecimal de 7–40 caracteres é aceito; qualquer outro valor vira `unknown`. Não é segredo. |
-| `DEMO_ENABLED` | não | `false` | Registra as rotas `/demo/*` (DP-02). Habilitar somente no serviço de demonstração; desligado, as rotas não existem (`404`). |
-| `DEMO_COMMANDS_PER_MINUTE` | não | `5` | Comandos de preparar/reiniciar sessão por usuário por minuto (1–60). Protege a criação de registros; é independente da cota de IA. |
-
----
-
-## Testes
-
-* **`npm test`** — suíte unitária (Vitest), dublês in-memory, sem rede nem Postgres real.
-* **`npm run test:integration:postgres:docker`** — sobe um PostgreSQL 16 efêmero via Docker Compose, aplica as migrations do zero, roda os testes de integração real (transação, rollback, concorrência, constraints, idempotência) e desmonta tudo no final.
-* **`npm run lint`** — ESLint (`typescript-eslint`, sem type-checking completo para evitar ruído em dublês de teste) com duas regras type-aware ligadas deliberadamente: `no-floating-promises` e `no-misused-promises` — a classe exata de defeito que já derrubou o processo em produção antes da correção.
-* **`npm run web:test`** — testes de componente e de cliente HTTP da interface (Vitest + Testing Library, contratos simulados por um backend falso em memória).
-* **`npm run web:test:e2e`** — jornada completa no navegador (Playwright, Chrome do sistema) contra a API real, PostgreSQL efêmero e um Gemini determinístico separado (`GOOGLE_GEMINI_BASE_URL` apontando para `web/e2e/fake-gemini.mjs`; o serviço público não tem endpoint de simulação).
-* **`npm run typecheck`**, **`npm run build`**, **`npm run prisma:validate`**, **`npm run verify:production`** completam o Definition of Done local.
-
----
-
-## Decisões arquiteturais deliberadas
-
-* **Sem container de injeção de dependência.** A composição de dependências é feita manualmente em `src/routes.ts`. O projeto é pequeno o suficiente para que um container adicione indireção sem benefício claro.
-* **Sem camada de `entities/`.** As regras de domínio que existem (CNPJ, coerência do DANFE) são funções puras em `src/domain/`; não há necessidade de objetos de entidade com identidade própria além do que os tipos de repositório (`IProduct`, `ICompany`, etc.) já expressam.
-* **Match incerto nunca entra direto no estoque.** Toda sugestão de similaridade da IA fica pendente até confirmação humana — não existe caminho de código que aplique uma sugestão automaticamente, mesmo com confiança alta.
-* **Indisponibilidade da IA nunca vira decisão de domínio.** O resultado da similaridade é uma união discriminada de três estados, e não `null`, justamente para que o compilador impeça `unavailable` de ser lido como `no_match`. Uma falha de transporte não pode criar produto no catálogo do cliente.
-* **Auditoria não tem endpoint de leitura HTTP hoje.** `IAuditLogRepository.findByCompanyId`/`findByUserId` existem, são testados e indexados, mas não há rota que os exponha — decisão deliberada de manter o escopo da API restrito ao fluxo operacional até haver necessidade real de um endpoint de auditoria.
-* **`AuditLog` não tem política de retenção automática.** Decisão conservadora: nenhuma exclusão automática até haver requisito legal/de negócio definido para o prazo de guarda de dado fiscal.
-* **`prisma.config.ts` não importa `src/config/env.ts`.** Faria o carregamento do módulo disparar `createEnv(process.env)` inteiro — exigindo `JWT_SECRET` e `GEMINI_API_KEY` só para rodar `prisma migrate`/`validate`/`generate` (P5-01). `resolveDatabaseUrl` (`src/config/database-url.ts`) lê e valida só `DATABASE_URL`.
-* **`429` do Gemini nunca dispara retry (P4-02).** Não há como distinguir de forma confiável, no status/corpo da resposta, throttling de janela curta (retry ajudaria) de cota diária esgotada (retry só queima mais uma requisição da cota compartilhada). Comportamento conservador deliberado: nunca repetir `429`; `500`/`503`/erros de rede continuam com retry normal.
-* **Tokens não têm teto interno no Modo A (D8), só requisições.** O AI Studio publica RPM/TPM/RPD para `gemini-2.5-flash`, mas não publica um TPD equivalente — não há de onde derivar um teto diário de tokens sem inventar uma fórmula de conversão. `ai_usage_ledger` já acumula `spentTokens`/`spentCostUsdNanos` sem impor limite, pronto para uma decisão futura com telemetria real do piloto; nenhum número foi inventado nem derivado de TPM.
-* **Artefatos de build (`.js`/`.d.ts`) são commitados junto do `.ts`.** Os testes importam por caminho `.js` (convenção `nodenext`); rode `npm run build` após editar `.ts` **antes de commitar** — ou o Vitest pode resolver o arquivo compilado desatualizado em vez do fonte, e o CI recusa o merge (`npm run verify:artifacts`, P5-06): o guard roda o build a partir do checkout limpo e falha se ele sujar qualquer artefato versionado, usando `git status --porcelain` como fonte de verdade em vez de uma lista manual de arquivos.
-
-## Limitações conhecidas
-
-* Não há catálogo de fornecedores nem conversão de unidades: o mesmo código de dois fornecedores, ou em unidades diferentes, é recusado (`422`), não unificado. Produtos criados antes da migration `20261010220000_add_supplier_origin` têm origem desconhecida e também recusam match exato até serem recriados (o ambiente sintético é descartável).
-* Não há Dockerfile de produção — o build de produção é validado no CI instalando só `dependencies`, mas não há imagem publicada.
-* Otimização em lote do matching permanece adiada. Há evidência de uma demonstração real pequena (guia), sem amostra suficiente para calibrar qualidade ou escala.
-* `TRUST_PROXY_HOPS` e `CORS_ALLOWED_ORIGINS` têm defaults seguros para instância única sem proxy; ajustar antes de colocar atrás de load balancer/CDN.
-
----
-
-## Executando localmente
+Requisitos: Node.js 24 (`.nvmrc`), PostgreSQL e uma chave da API do Gemini. Docker é necessário apenas para os testes de integração e E2E.
 
 ```bash
 npm ci
-cp .env.example .env   # preencher DATABASE_URL, JWT_SECRET (>= 32 caracteres, ex.: `openssl rand -base64 48`), GEMINI_API_KEY, INVITE_CODE (>= 8 caracteres)
+cp .env.example .env    # preencher DATABASE_URL, JWT_SECRET (>= 32 caracteres), GEMINI_API_KEY e INVITE_CODE (>= 8 caracteres)
 npm run prisma:generate
-npm run dev             # tsx watch, recarrega em mudanças
+npx prisma migrate deploy
+npm run dev             # API em http://localhost:3333
 ```
 
-Para rodar a suíte de integração contra Postgres real é necessário Docker (`docker-compose.test.yml` sobe um banco efêmero isolado, nunca a `DATABASE_URL` de desenvolvimento).
+Para usar a interface e as rotas da demonstração localmente:
+
+```bash
+npm run web:install && npm run web:build   # gera web/dist, servido em /app
+# no .env: DEMO_ENABLED=true
+npm run build && npm start                  # http://localhost:3333/app/
+```
+
+Verificações:
+
+```bash
+npm test                                   # unitários
+npm run test:integration:postgres:docker   # integração (PostgreSQL efêmero via Docker)
+npm run web:test                           # componentes da interface
+npm run web:test:e2e                       # E2E (Docker e Chrome)
+npm run typecheck && npm run lint && npm run build && npm run verify:artifacts
+```
+
+Os testes não chamam o Gemini real. `JWT_SECRET` pode ser gerado com `openssl rand -base64 48`.
+
+## Limitações conhecidas
+
+- **Identificação do visitante atrás do proxy do Render (D03):** o limite de tentativas de login usa o endereço de rede do visitante, e atrás da cadeia Cloudflare + balanceador do Render essa identificação não é estável. Na prática, visitantes podem dividir o mesmo limite, ou um visitante pode ter o limite dividido. Não permite falsificar a identidade; o efeito possível é um aviso de limite temporário. Detalhes em [DP-04](docs/evidence/DP-04.md) e no [runbook](docs/demo-operations-runbook.md) §10.
+- **Dependências externas em plano gratuito:** a disponibilidade depende do Google Gemini (sem cota reservada), do Render (inicialização lenta após inatividade) e do Neon.
+- **Escopo do domínio:** sem catálogo de fornecedores nem conversão de unidades; o mesmo código de fornecedores ou unidades diferentes é recusado, não unificado. Produtos criados antes da migration `20261010220000_add_supplier_origin` têm origem desconhecida e recusam match exato.
+- **Operação:** sem backup/restore com garantia de recuperação, sem recuperação de senha por e-mail, sem Dockerfile de produção. Rollback e encerramento gracioso foram ensaiados localmente, não no serviço publicado.
+- A qualidade do matching foi observada em uma demonstração pequena; não há amostra para medir precisão.
 
 ---
 
+# Referência
+
+## API
+
+Respostas no envelope `{ status: 'success', data }` ou `{ status: 'error', message }`.
+
+| Método | Rota | Autenticação | Descrição |
+|---|---|---|---|
+| `GET` | `/health` | pública | `SELECT 1` real; sucesso em cache por 5 s; 60/IP/min; `503` com banco indisponível ou em shutdown. |
+| `GET` | `/version` | pública | SHA da release da API e da interface. |
+| `POST` | `/users` | pública, 5/hora por IP | Cadastro com `inviteCode`; ausente ou incorreto devolve o mesmo `403`. |
+| `POST` | `/login` | pública, 10/15 min por IP | Devolve JWT. |
+| `PATCH` | `/me/password` | JWT, 5/min por usuário | Troca a senha e invalida tokens anteriores (`204`). |
+| `POST` | `/companies` | JWT, 5/min por usuário | Cria empresa e estoque principal na mesma transação. |
+| `GET` | `/companies` | JWT | Empresas acessíveis, com papel (`OWNER`/`COLLABORATOR`), paginação por cursor. |
+| `GET` | `/companies/:companyId/stocks` | JWT | Estoques visíveis; `404` sem distinguir inexistente de sem acesso. |
+| `GET` | `/products` | JWT | Produtos por `stockId`, paginação por cursor. |
+| `POST` | `/invoices/upload` | JWT, 5/min por usuário | Upload do DANFE e pipeline completo. `400`/`422` documento inválido ou conflito; `409` duplicata; `503` IA indisponível, sem gravar. |
+| `GET` | `/stocks/:stockId/suggestions` | JWT | Sugestões pendentes. |
+| `POST` | `/suggestions/:suggestionId/confirm` | JWT | Soma a entrada ao produto sugerido. |
+| `POST` | `/suggestions/:suggestionId/reject` | JWT | Cadastra o item como produto novo. |
+| `POST` | `/demo/sessions` | JWT, `DEMO_ENABLED=true` | Prepara ou reutiliza a sessão de demonstração (sem IA). |
+| `GET` | `/demo/sessions/current` | JWT, `DEMO_ENABLED=true` | Sessão ativa ou `404`. |
+| `GET` | `/demo/sessions/:sessionId/documents/:kind` | JWT, `DEMO_ENABLED=true` | PDF sintético (`initial` ou `followup`) com chave exclusiva da sessão. |
+| `POST` | `/demo/sessions/:sessionId/restart` | JWT, `DEMO_ENABLED=true` | Arquiva a sessão e cria outra vazia (idempotente). |
+
+## Variáveis de ambiente
+
+Validadas no boot (`src/config/env.ts`); valor inválido impede a inicialização. Modelo em `.env.example`.
+
+| Variável | Obrigatória | Default | Descrição |
+|---|---|---|---|
+| `DATABASE_URL` | sim | — | PostgreSQL. |
+| `JWT_SECRET` | sim | — | Assinatura HS256; mínimo de 32 caracteres. |
+| `GEMINI_API_KEY` | sim | — | Google Gemini. |
+| `INVITE_CODE` | sim | — | Convite exigido no cadastro; mínimo de 8 caracteres; nunca versionado. |
+| `PORT` | não | `3333` | Porta HTTP. |
+| `TRUST_PROXY_HOPS` | não | `0` | Proxies confiáveis (0–10) no modo `hops`. Atrás de Cloudflare + Render, `1` identifica a borda do Cloudflare e `2` aceita valor forjado com cadeia incompleta; preferir `TRUST_PROXY_MODE`. |
+| `TRUST_PROXY_MODE` | não | `hops` | `hops` ou `render-cloudflare` (exige `RENDER=true` e `TRUST_PROXY_HOPS` ausente/`0`). Ver runbook §10. |
+| `CORS_ALLOWED_ORIGINS` | não | vazio | Allowlist HTTP(S) separada por vírgula; sem wildcard. |
+| `REQUEST_TIMEOUT_MS` | não | `120000` | Timeout de requisição. |
+| `SHUTDOWN_TIMEOUT_MS` | não | `30000` | Prazo do encerramento gracioso. |
+| `GEMINI_TIMEOUT_MS` | não | `30000` | Timeout por tentativa ao Gemini. |
+| `GEMINI_MAX_ATTEMPTS` | não | `2` | Tentativas (1–2) para erro transitório. |
+| `SIMILARITY_CONFIDENCE_THRESHOLD` | não | `0.7` | Limiar de confiança da similaridade (0–1). |
+| `DANFE_MAX_ITEMS` | não | `100` | Itens por nota (1–1000); acima disso, `422`. |
+| `GEMINI_ENABLED` | não | `true` | `false` recusa toda chamada de IA com `503`. |
+| `GEMINI_QUOTA_ENFORCEMENT_ENABLED` | não | `false` | Aplica tetos diários; a contabilização continua nos dois modos. |
+| `GEMINI_GLOBAL_REQUESTS_PER_DAY` | não | `18` | Teto global (1–20), só com enforcement. |
+| `GEMINI_USER_REQUESTS_PER_DAY` | não | `5` | Teto por usuário (1–20), só com enforcement. |
+| `RELEASE_SHA` | não | — | SHA exibido em `/version` quando `RENDER_GIT_COMMIT` não existe. |
+| `DEMO_ENABLED` | não | `false` | Registra as rotas `/demo/*`. |
+| `DEMO_COMMANDS_PER_MINUTE` | não | `5` | Preparar/reiniciar sessão por usuário por minuto (1–60). |
+
 ## Deploy (Render + Neon)
 
-**Status: primeiro deploy corrigido concluído em 2026-09-02.** O commit `ddb8536` ficou Live no Render Free contra Neon Free. `prisma generate`, build TypeScript e `prisma migrate deploy` passaram; um segundo deploy do mesmo commit encontrou 13 migrations e nenhuma pendente, e `prisma migrate status` local contra a URL direta real declarou o schema atualizado. `/health` público retornou `200 {"status":"ok"}` e, como executa `SELECT 1`, comprovou a conexão runtime pooled. A observação de `SIGTERM → exit 0` no Render real permanece **NOT_YET_VERIFIED / DEFERRED** para P5-02; não foi inferida dos testes e não será buscada por restart/redeploy exclusivo.
+- **Build:** `npm ci && npm run render:build` (Prisma generate, build da API e da interface, `prisma migrate deploy`). O mesmo comando roda no CI a partir de um checkout limpo.
+- **Start:** `DATABASE_URL=$DATABASE_URL_POOLED npm start`. A migration usa a conexão direta do Neon; a aplicação usa a conexão com pooler.
+- **Migrations seguem expand/contract:** rodam antes da nova versão entrar em tráfego e não são desfeitas por rollback, então toda migration precisa ser compatível com a versão anterior.
+- Segredos (`JWT_SECRET`, `GEMINI_API_KEY`, `INVITE_CODE`) ficam só no painel do Render.
 
-* **Sem Dockerfile.** O runtime nativo Node do Render usa build/start commands; `npm prune --omit=dev` + `verify:production` já validam o grafo de produção no CI. Um Dockerfile acrescentaria superfície sem resolver nada que o runtime nativo não resolva — revisitar só se o build vier a exigir binário de sistema.
-* **Build command:** `npm ci && npm run render:build` (equivalente a `npm ci && npm run prisma:generate && npm run build && npm --prefix web ci && npm --prefix web run build && npx prisma migrate deploy` — `prisma generate` precisa rodar **antes** de `tsc`, nunca implícito em `npm ci`: não há `postinstall`/`prepare` neste projeto, por decisão deliberada, para não exigir `DATABASE_URL` em todo `npm install`). Guardado contra regressão por um job de CI dedicado (`render-build-command`, ver `.github/workflows/ci.yml`) que roda esse exato comando a partir de um checkout novo, contra Postgres efêmero.
-* **Start command:** `DATABASE_URL=$DATABASE_URL_POOLED npm start` — reatribui `DATABASE_URL` só para o processo em execução; a variável `DATABASE_URL` configurada no painel do Render permanece a *direta* (usada pelo build/migration acima).
-* **Migration no build, não em Pre-Deploy Command** (exclusivo de planos pagos no Render). Efeito: `prisma` existe no momento do build (antes do `npm prune`), o que resolve o problema de empacotamento sem exigir Dockerfile — mas a migration roda **antes** da nova versão entrar em tráfego e **não é desfeita por rollback**.
-* **Política expand/contract é obrigatória, não recomendada**, por causa do ponto acima: toda migration precisa ser compatível com a versão anterior da aplicação, porque essa versão pode voltar a rodar contra o schema novo após um rollback. Verificado: nenhuma das migrations existentes viola isso.
-* **`prisma.config.ts` só exige `DATABASE_URL`** (não `JWT_SECRET`/`GEMINI_API_KEY`) — decoupling deliberado de `src/config/env.ts`, cujo carregamento do módulo dispara a validação completa do ambiente. Rodar uma migration nunca deveria exigir a chave do Gemini.
-* **`DATABASE_URL`** (painel do Render) deve usar a string **direta** do Neon (sem `-pooler`), com `sslmode=require` — `prisma migrate deploy` precisa de semântica de sessão/lock que um pooler em modo transação pode quebrar. **`DATABASE_URL_POOLED`** (variável separada, também no painel) usa a string com sufixo `-pooler`, e só chega à aplicação em runtime via o Start Command acima — o build/migration nunca a vê.
-* Segredos (`JWT_SECRET`, `GEMINI_API_KEY`, `INVITE_CODE`) vão **só** no painel do Render — nenhum em arquivo versionado.
+## Documentação
 
-P5-01 está concluída com o deploy, migrations, status e healthcheck reais acima. P5-02 está desbloqueada e concentra as validações de configuração de produção, incluindo a observação oportunística — ainda pendente — de `SIGTERM → exit 0` no Render real.
+| Documento | Conteúdo |
+|---|---|
+| [Visão técnica](docs/portfolio-technical-overview.md) | resumo para apresentação: IA, integridade, custo e observabilidade |
+| [Roteiro da demonstração](docs/portfolio-demo-guide.md) | passo a passo pela API e resultados esperados |
+| [Especificação da demonstração](docs/portfolio-demo-spec.md) | escopo e decisões da demo |
+| [Runbook operacional](docs/demo-operations-runbook.md) | publicação, smoke, rollback, proxy |
+| [Runbook de telemetria](docs/telemetry-runbook.md) | consultas de chamadas, tokens, falhas e reconciliação |
+| [Roadmap da demonstração](docs/demo-pilot-roadmap.md) | milestones DP-00 a DP-05 e evidências |
+| [Auditoria técnica](docs/auditoria-tecnica.md) e [backlog](docs/backlog-engenharia.md) | histórico de decisões e plano de engenharia |

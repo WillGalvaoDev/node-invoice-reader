@@ -33,8 +33,8 @@ Ficam fora: provedor pago, faturamento, orçamento por usuário, recuperação p
 | [DP-01](milestones/DP-01-integridade.md) | Integridade e exposição do backend | DP-00 | Nenhuma fusão silenciosa por fornecedor/unidade; riscos de dependências triados | Concluída localmente, não commitada ([evidência](evidence/DP-01.md)) |
 | [DP-02](milestones/DP-02-sessoes-demo.md) | Ambiente reproduzível por visitante | DP-01 | Dois visitantes e duas execuções isoladas, sem ferramentas externas | Concluída localmente, não commitada ([evidência](evidence/DP-02.md)) |
 | [DP-03](milestones/DP-03-interface.md) | Jornada web de demonstração | DP-02 | Fluxo completo e falhas compreensíveis no navegador | Concluída localmente, não commitada ([evidência](evidence/DP-03.md)) |
-| [DP-04](milestones/DP-04-deploy.md) | Publicação e operação mínima | DP-01–03 | Release identificada, smoke, recuperação e rollback ensaiados | **Bloqueada** (hospedado): preparação e ensaios locais isolados concluídos ([evidência](evidence/DP-04.md)) |
-| [DP-05](milestones/DP-05-aceite.md) | Aceite hospedado e material de portfólio | DP-04 | Fluxo real publicado, evidências e instruções para visitante | **Parcial**: A01/A02/A05/A06 aprovados (A01/A02 por teste manual hospedado); A03/A04/A07 parciais; A08 bloqueado (smoke exige conta); depende de corrigir D03 ([evidência](evidence/DP-05.md)) |
+| [DP-04](milestones/DP-04-deploy.md) | Publicação e operação mínima | DP-01–03 | Release identificada, smoke, recuperação e rollback ensaiados | **Encerrada para demo de portfólio** (2026-10-13): release `d3b984f` publicada; D01/D04/D07 concluídos, D02/D05/D06 parciais, D08 deferred, **D03 limitação conhecida** ([evidência](evidence/DP-04.md)) |
+| [DP-05](milestones/DP-05-aceite.md) | Aceite hospedado e material de portfólio | DP-04 | Fluxo real publicado, evidências e instruções para visitante | **Encerrada para demo de portfólio — PORTFOLIO DEMO READY** (2026-10-13): A01/A02/A05/A06 concluídos; A03/A04 parciais; A07/A08 deferred ([evidência](evidence/DP-05.md)) |
 
 A sequência padrão inclui DP-03. Preparar contratos e infraestrutura pode ocorrer antes, mas não marcar uma entrega como aceita sem suas dependências. A próxima tarefa é **DP-00**, incorporando o restante de P5-02; não reiniciar as etapas antigas já concluídas.
 
@@ -101,7 +101,7 @@ Estados permitidos: não iniciada → em andamento → bloqueada (causa concreta
 | DP-01 | Concluída | Commitada e publicada; CI verde |
 | DP-02 | Concluída | Commitada e publicada; CI verde (rotas `/demo` ainda desabilitadas no serviço) |
 | DP-03 | Concluída | Commitada e publicada; E2E local e CI (`web`, `web-e2e`) verdes |
-| DP-04 | Parcial: publicada e funcional; D03 reprovado | `/version` API = web = HEAD, `DEMO_ENABLED` ativa, fluxo hospedado validado manualmente. D03: defeito confirmado (chave de rate limit é o salto do proxy, não o visitante), reproduzido em testes; correção em avaliação, nenhuma aplicada. Smoke autenticado, cold start e rollback público pendentes |
-| DP-05 | Bloqueada | Depende de DP-04 e de execução com Gemini real hospedado |
+| DP-04 | Encerrada para demo de portfólio, com D03 como limitação conhecida | `d3b984f` em execução (`/version` API = web), `DEMO_ENABLED` ativa, modo `render-cloudflare` ativo; D03 A1 FAIL/A3 não executado; smoke autenticado, cold start e rollback público deferidos |
+| DP-05 | Encerrada para demo de portfólio, com pendências deferidas | Fluxo hospedado com Gemini real validado manualmente (A01/A02); PORTFOLIO DEMO READY; README com URL pública e acesso por convite; A07/A08, telemetria e capturas hospedadas deferidos |
 
 Definition of Done do piloto (§6): **nenhum item pode ser marcado**. Itens com cobertura local automatizada (isolamento entre contas, confirmação/rejeição sem dupla movimentação, 429/duplicata/conflito) ainda exigem o aceite hospedado. Nada foi commitado, publicado nem alterado em serviço hospedado nesta etapa.
