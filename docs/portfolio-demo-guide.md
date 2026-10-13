@@ -17,7 +17,8 @@ GEMINI_QUOTA_ENFORCEMENT_ENABLED=false
 Os defaults já são esses. A nova flag desliga somente os tetos diários internos;
 o ledger continua medindo e a proteção HTTP continua ativa. Alterar configuração
 requer reiniciar o processo. O código atualizado precisa ser implantado antes de
-ter efeito no Render. Esta implementação não alterou o ambiente hospedado.
+ter efeito no Render. O fluxo com Gemini real foi validado manualmente no serviço
+publicado em 2026-10-13 (confirmação e rejeição; ver [DP-05](evidence/DP-05.md)).
 
 O Gemini pode recusar chamadas mesmo com enforcement desligado. Não há garantia
 de cota disponível por visitante. Erro 503 com a mensagem de limite temporário
